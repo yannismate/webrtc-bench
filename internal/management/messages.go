@@ -2,7 +2,7 @@ package management
 
 import (
 	"encoding/json"
-	"pion-bench/internal/cases"
+	"webrtc-bench/internal/cases"
 )
 
 const (

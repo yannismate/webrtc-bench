@@ -1,4 +1,4 @@
-module pion-bench
+module webrtc-bench
 
 go 1.23.0
 

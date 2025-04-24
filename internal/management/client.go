@@ -5,8 +5,8 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
 	"net/http"
-	"pion-bench/internal/cases"
 	"time"
+	"webrtc-bench/internal/cases"
 )
 
 type Client interface {

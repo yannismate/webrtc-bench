@@ -4,9 +4,9 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"os"
-	"pion-bench/internal/cases"
-	"pion-bench/internal/management"
 	"time"
+	"webrtc-bench/internal/cases"
+	"webrtc-bench/internal/management"
 )
 
 func main() {
