@@ -1,7 +1,7 @@
 package cases
 
 import (
-	"time"
+	"webrtc-bench/internal/util"
 )
 
 type CaseType string
@@ -11,9 +11,10 @@ const (
 )
 
 type Case struct {
+	Name        string
 	PeerConfigs map[string]PeerCaseConfig
 	CaseType    CaseType
-	Duration    time.Duration
+	Duration    util.JSONDuration
 }
 
 type PeerCaseExecutor interface {

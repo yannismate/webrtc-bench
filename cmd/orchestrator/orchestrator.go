@@ -1,85 +1,135 @@
 package main
 
 import (
+	"encoding/json"
+	"flag"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"io"
+	"iter"
+	"maps"
 	"os"
+	"sync"
 	"time"
 	"webrtc-bench/internal/cases"
 	"webrtc-bench/internal/management"
 )
 
+type RunState int
+
+const (
+	RunStateBeforeTest RunState = iota
+	RunStateTesting
+	RunStateAfterTest
+)
+
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
+
+	caseFilePath := flag.String("cases", "cases.json", "path to cases configuration")
+	flag.Parse()
+
+	caseFile, err := os.Open(*caseFilePath)
+	if err != nil {
+		log.Fatal().Err(err).Str("path", *caseFilePath).Msg("Failed to open cases file")
+		return
+	}
+
+	caseData, err := io.ReadAll(caseFile)
+	if err != nil {
+		log.Fatal().Err(err).Str("path", *caseFilePath).Msg("Failed to read cases file")
+		return
+	}
+	_ = caseFile.Close()
+
+	var testCases []cases.Case
+	err = json.Unmarshal(caseData, &testCases)
+	if err != nil {
+		log.Fatal().Err(err).Str("path", *caseFilePath).Msg("Failed to parse cases file")
+		return
+	}
 
 	server := management.NewServer(8080, "someAuthenticationKey")
 	server.Start()
 
-	connectedClients := 0
-	server.SetRegisteredClientUpdateListener(func(isConnected bool, clientName string) {
-		if isConnected {
-			log.Info().Msgf("Client %s connected", clientName)
-			connectedClients++
-		} else {
-			log.Info().Msgf("Client %s disconnected", clientName)
-			connectedClients--
-			return
-		}
+	connectedClients := make(map[string]management.ClientState)
+	clientStateLock := &sync.Mutex{}
+	currentCase := 0
+	runState := RunStateBeforeTest
+	endTestingChan := make(chan bool)
 
-		if connectedClients == 2 {
-			go startTestExec(server)
+	server.SetClientStateUpdateListener(func(clientName string, newState management.ClientState) {
+		clientStateLock.Lock()
+		defer clientStateLock.Unlock()
+		connectedClients[clientName] = newState
+		log.Debug().Msgf("Client %s is now in state %s", clientName, newState)
+
+		if (runState == RunStateBeforeTest || runState == RunStateAfterTest) &&
+			allTestClientsInState(connectedClients, maps.Keys(testCases[currentCase].PeerConfigs), management.ClientStateRegistered) {
+
+			if runState == RunStateAfterTest {
+				if currentCase == len(testCases)-1 {
+					log.Info().Msgf("Finished last test case! Exiting...")
+					endTestingChan <- true
+					return
+				}
+				runState = RunStateBeforeTest
+				currentCase++
+			}
+			log.Info().Msg("Configuring clients")
+			for name, peerConfig := range testCases[currentCase].PeerConfigs {
+				err := server.SendMessage(name, management.MessageTypeConfigureClient, management.MessageConfigureClient{
+					CaseType: cases.CaseTypeConnect,
+					Config:   peerConfig,
+				})
+				if err != nil {
+					log.Fatal().Err(err).Msg("Failed to send configure client message")
+					return
+				}
+			}
+		} else if runState == RunStateBeforeTest &&
+			allTestClientsInState(connectedClients, maps.Keys(testCases[currentCase].PeerConfigs), management.ClientStateTestReady) {
+
+			log.Info().Msgf("Starting test case %s [%s]", testCases[currentCase].Name, testCases[currentCase].CaseType)
+			runState = RunStateTesting
+			for name, _ := range testCases[currentCase].PeerConfigs {
+				err := server.SendMessage(name, management.MessageTypeStartCaseExecution, nil)
+				if err != nil {
+					log.Fatal().Err(err).Msg("Failed to send start case execution message")
+					return
+				}
+			}
+			go func() {
+				time.Sleep(time.Duration(testCases[currentCase].Duration))
+				runState = RunStateAfterTest
+				log.Info().Msg("Stopping test case")
+				for name, _ := range testCases[currentCase].PeerConfigs {
+					err := server.SendMessage(name, management.MessageTypeStopCaseExecution, nil)
+					if err != nil {
+						log.Fatal().Err(err).Msg("Failed to send start case execution message")
+						return
+					}
+				}
+			}()
+		} else if runState == RunStateTesting && newState != management.ClientStateTesting {
+			log.Error().Msg("Client changed state during test!")
 		}
 	})
 
-	select {}
+	select {
+	case <-endTestingChan:
+	}
 }
 
-func startTestExec(server management.Server) {
-	testCase := cases.Case{
-		PeerConfigs: map[string]cases.PeerCaseConfig{
-			"starlink": {
-				ICEServers:       []string{"stun:stun.l.google.com:19302"},
-				SendOffer:        true,
-				AdditionalConfig: nil,
-			},
-			"server": {
-				ICEServers:       []string{"stun:stun.l.google.com:19302"},
-				SendOffer:        false,
-				AdditionalConfig: nil,
-			},
-		},
-		Duration: time.Minute * 5,
-	}
-
-	log.Info().Msg("Configuring clients")
-	for name, peerConfig := range testCase.PeerConfigs {
-		err := server.SendMessage(name, management.MessageTypeConfigureClient, management.MessageConfigureClient{
-			CaseType: cases.CaseTypeConnect,
-			Config:   peerConfig,
-		})
-		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to send configure client message")
-			return
+func allTestClientsInState(states map[string]management.ClientState, requiredClients iter.Seq[string], requiredState management.ClientState) bool {
+	for clientName := range requiredClients {
+		if cState, ok := states[clientName]; ok {
+			if cState != requiredState {
+				return false
+			}
+		} else {
+			return false
 		}
 	}
-
-	log.Info().Msg("Starting test case")
-	for name, _ := range testCase.PeerConfigs {
-		err := server.SendMessage(name, management.MessageTypeStartCaseExecution, nil)
-		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to send start case execution message")
-			return
-		}
-	}
-
-	time.Sleep(testCase.Duration)
-
-	log.Info().Msg("Stopping test case")
-	for name, _ := range testCase.PeerConfigs {
-		err := server.SendMessage(name, management.MessageTypeStopCaseExecution, nil)
-		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to send start case execution message")
-			return
-		}
-	}
+	return true
 }

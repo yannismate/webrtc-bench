@@ -16,16 +16,16 @@ import (
 
 type Server interface {
 	Start()
-	SetRegisteredClientUpdateListener(func(bool, string))
+	SetClientStateUpdateListener(func(string, ClientState))
 	SendMessage(clientName string, messageType MessageType, content interface{}) error
 }
 
 type server struct {
 	Port int
 	// This is not particularly secure over non-HTTPS connections, but it will do for these benchmarks
-	AuthenticationKey        string
-	Clients                  map[string]wsClient
-	OnRegisteredClientUpdate func(bool, string)
+	AuthenticationKey         string
+	Clients                   map[string]wsClient
+	ClientStateUpdateListener func(string, ClientState)
 }
 
 type wsClient struct {
@@ -35,10 +35,10 @@ type wsClient struct {
 
 func NewServer(port int, authenticationKey string) Server {
 	return &server{
-		Port:                     port,
-		AuthenticationKey:        authenticationKey,
-		Clients:                  make(map[string]wsClient),
-		OnRegisteredClientUpdate: func(bool, string) {},
+		Port:                      port,
+		AuthenticationKey:         authenticationKey,
+		Clients:                   make(map[string]wsClient),
+		ClientStateUpdateListener: func(string, ClientState) {},
 	}
 }
 
@@ -72,8 +72,8 @@ func (s *server) Start() {
 	}()
 }
 
-func (s *server) SetRegisteredClientUpdateListener(f func(bool, string)) {
-	s.OnRegisteredClientUpdate = f
+func (s *server) SetClientStateUpdateListener(f func(string, ClientState)) {
+	s.ClientStateUpdateListener = f
 }
 
 func (s *server) getPeerByName(name string) (wsClient, bool) {
@@ -136,7 +136,7 @@ func (s *server) handleWs(w http.ResponseWriter, r *http.Request) {
 		disconnectedClient := s.Clients[clientId]
 		if disconnectedClient.RegisteredAsClient != nil {
 			log.Warn().Str("client_id", clientId).Str("client_name", *disconnectedClient.RegisteredAsClient).Msg("Registered client disconnected")
-			s.OnRegisteredClientUpdate(false, *disconnectedClient.RegisteredAsClient)
+			s.ClientStateUpdateListener(*disconnectedClient.RegisteredAsClient, ClientStateDisconnected)
 		} else {
 			log.Info().Str("client_id", clientId).Msg("Client disconnected")
 		}
@@ -214,7 +214,18 @@ func (s *server) handleWs(w http.ResponseWriter, r *http.Request) {
 					SendChan:           s.Clients[clientId].SendChan,
 					RegisteredAsClient: &innerMsg.ClientName,
 				}
-				s.OnRegisteredClientUpdate(true, innerMsg.ClientName)
+			case MessageTypeClientStateUpdate:
+				innerMsg := MessageClientStateUpdate{}
+				err := json.Unmarshal(outerMsg.Data, &innerMsg)
+				if err != nil {
+					log.Warn().Err(err).Msg("Could not parse received client state update message")
+					_ = c.Close()
+					return
+				}
+
+				if s.Clients[clientId].RegisteredAsClient != nil {
+					s.ClientStateUpdateListener(*s.Clients[clientId].RegisteredAsClient, innerMsg.State)
+				}
 			case MessageTypePeerSignal:
 				innerMsg := MessagePeerSignal{}
 				err := json.Unmarshal(outerMsg.Data, &innerMsg)

@@ -11,7 +11,7 @@ import (
 
 type Client interface {
 	Start()
-	SendMessage(msgType MessageType, content interface{}) error
+	SendMessage(msgType MessageType, content interface{})
 }
 
 type client struct {
@@ -104,6 +104,7 @@ func (c *client) Start() {
 				switch outerMsg.MessageType {
 				case MessageTypeRegisterClientOk:
 					log.Info().Msg("Client registration succeeded")
+					c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateRegistered})
 				case MessageTypeConfigureClient:
 					innerMsg := MessageConfigureClient{}
 					err := json.Unmarshal(outerMsg.Data, &innerMsg)
@@ -112,13 +113,16 @@ func (c *client) Start() {
 						_ = conn.Close()
 						return
 					}
+					c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateConfiguring})
 					c.configureCase(innerMsg)
+					c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateTestReady})
 				case MessageTypeStartCaseExecution:
 					if c.CurrentCase == nil {
 						log.Error().Msg("Cannot start execution, no case configured!")
 						continue
 					}
 					err := c.CurrentCase.Start()
+					c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateTesting})
 					log.Info().Msg("Case execution started")
 					if err != nil {
 						log.Warn().Err(err).Msg("Error while starting case execution")
@@ -131,7 +135,10 @@ func (c *client) Start() {
 						continue
 					}
 					c.CurrentCase.Stop()
+					c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateTestEnding})
 					log.Info().Msg("Case execution stopped")
+					// TODO: send stats
+					c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateRegistered})
 				case MessageTypePeerSignal:
 					if c.CurrentCase == nil {
 						log.Error().Msg("Cannot receive peer signal, no case configured!")
@@ -155,12 +162,11 @@ func (c *client) Start() {
 	}()
 }
 
-func (c *client) SendMessage(msgType MessageType, content interface{}) error {
+func (c *client) SendMessage(msgType MessageType, content interface{}) {
 	innerMsg, err := json.Marshal(content)
 	if err != nil {
-		return err
+		log.Panic().Err(err).Msg("Could not marshal inner message to JSON")
 	}
-
 	container := MessageContainer{
 		MessageType: msgType,
 		Data:        innerMsg,
@@ -168,11 +174,10 @@ func (c *client) SendMessage(msgType MessageType, content interface{}) error {
 
 	msgData, err := json.Marshal(container)
 	if err != nil {
-		return err
+		log.Panic().Err(err).Msg("Could not marshal container to JSON")
 	}
 
 	c.SendChan <- msgData
-	return nil
 }
 
 func (c *client) configureCase(configMsg MessageConfigureClient) {
@@ -185,7 +190,8 @@ func (c *client) configureCase(configMsg MessageConfigureClient) {
 
 	err := c.CurrentCase.Configure(configMsg.Config, func(signalType cases.PeerSignalType, data []byte) error {
 		log.Debug().Msgf("OnSendSignal: [%s] %s", signalType, data)
-		return c.SendMessage(MessageTypePeerSignal, MessagePeerSignal{SignalType: signalType, Data: data})
+		c.SendMessage(MessageTypePeerSignal, MessagePeerSignal{SignalType: signalType, Data: data})
+		return nil
 	})
 	if err != nil {
 		log.Fatal().Err(err).Msg("Error configuring case")
