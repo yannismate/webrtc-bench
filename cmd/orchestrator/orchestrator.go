@@ -69,7 +69,12 @@ func main() {
 
 			if runState == RunStateAfterTest {
 				if currentCase == len(testCases)-1 {
-					log.Info().Msgf("Finished last test case! Exiting...")
+					log.Info().Msgf("Finished last test case! Shutting down clients.")
+					for cn, _ := range connectedClients {
+						_ = server.SendMessage(cn, management.MessageTypeShutdown, nil)
+					}
+					// Wait for shutdown commands to be sent
+					time.Sleep(1 * time.Second)
 					endTestingChan <- true
 					return
 				}
@@ -79,7 +84,7 @@ func main() {
 			log.Info().Msg("Configuring clients")
 			for name, peerConfig := range testCases[currentCase].PeerConfigs {
 				err := server.SendMessage(name, management.MessageTypeConfigureClient, management.MessageConfigureClient{
-					CaseType: cases.CaseTypeConnect,
+					CaseType: testCases[currentCase].CaseType,
 					Config:   peerConfig,
 				})
 				if err != nil {

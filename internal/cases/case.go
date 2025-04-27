@@ -1,6 +1,7 @@
 package cases
 
 import (
+	"webrtc-bench/internal/cases/stats"
 	"webrtc-bench/internal/util"
 )
 
@@ -8,6 +9,7 @@ type CaseType string
 
 const (
 	CaseTypeConnect CaseType = "connect"
+	CaseTypeVideo   CaseType = "video"
 )
 
 type Case struct {
@@ -18,7 +20,7 @@ type Case struct {
 }
 
 type PeerCaseExecutor interface {
-	Configure(config PeerCaseConfig, sendSignal func(signalType PeerSignalType, data []byte) error) error
+	Configure(config PeerCaseConfig, sendSignal func(signalType PeerSignalType, data []byte) error, statCollector stats.StatCollector) error
 	Start() error
 	OnReceiveSignal(signalType PeerSignalType, message []byte) error
 	Stop()
@@ -27,6 +29,7 @@ type PeerCaseExecutor interface {
 type PeerCaseConfig struct {
 	ICEServers       []string
 	SendOffer        bool
+	StatInterval     util.JSONDuration
 	AdditionalConfig map[string]string
 }
 

@@ -6,10 +6,12 @@ import (
 	"github.com/pion/webrtc/v4"
 	"github.com/rs/zerolog/log"
 	"sync"
+	"time"
 	"webrtc-bench/internal/cases/stats"
+	"webrtc-bench/internal/cases/testsource"
 )
 
-type CaseConnect struct {
+type CaseVideo struct {
 	sendSignal     func(signalType PeerSignalType, data []byte) error
 	webrtcCfg      webrtc.Configuration
 	sendOffer      bool
@@ -18,9 +20,11 @@ type CaseConnect struct {
 	pendingCandidates []*webrtc.ICECandidate
 	candidatesMux     sync.Mutex
 	statCollector     stats.StatCollector
+	statInterval      time.Duration
+	testSource        testsource.FakeRTPDataWriter
 }
 
-func (c *CaseConnect) Configure(config PeerCaseConfig, sendSignal func(signalType PeerSignalType, data []byte) error, statCollector stats.StatCollector) error {
+func (c *CaseVideo) Configure(config PeerCaseConfig, sendSignal func(signalType PeerSignalType, data []byte) error, statCollector stats.StatCollector) error {
 	c.sendSignal = sendSignal
 	c.webrtcCfg = webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
@@ -31,10 +35,11 @@ func (c *CaseConnect) Configure(config PeerCaseConfig, sendSignal func(signalTyp
 	}
 	c.sendOffer = config.SendOffer
 	c.statCollector = statCollector
+	c.testSource = testsource.NewFakeRTPDataWriter(10000)
 	return nil
 }
 
-func (c *CaseConnect) Start() error {
+func (c *CaseVideo) Start() error {
 	api := webrtc.NewAPI(webrtc.WithInterceptorRegistry(c.statCollector.GetInterceptorRegistry()))
 	peerConnection, err := api.NewPeerConnection(c.webrtcCfg)
 	c.peerConnection = peerConnection
@@ -44,6 +49,16 @@ func (c *CaseConnect) Start() error {
 
 	peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		log.Info().Msgf("Peer Connection State has changed: %s", state.String())
+		if state == webrtc.PeerConnectionStateConnected {
+			if c.sendOffer {
+				c.statCollector.StartCollection(c.testSource.Start())
+			}
+		} else if state == webrtc.PeerConnectionStateDisconnected {
+			if c.sendOffer {
+				c.testSource.Stop()
+			}
+			c.statCollector.StopCollection()
+		}
 	})
 
 	peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
@@ -65,16 +80,27 @@ func (c *CaseConnect) Start() error {
 		}
 	})
 
+	peerConnection.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		c.statCollector.StartCollection(uint32(remoteTrack.SSRC()))
+
+		for {
+			// read and discard RTP stream
+			_, _, readErr := remoteTrack.ReadRTP()
+			if readErr != nil {
+				log.Error().Err(readErr).Msgf("Error reading from remote track")
+				_ = peerConnection.Close()
+				break
+			}
+		}
+	})
+
 	if c.sendOffer {
-		dataChannel, err := peerConnection.CreateDataChannel("test", nil)
+
+		err = c.testSource.CreateTrack(peerConnection)
 		if err != nil {
-			log.Error().Err(err).Msgf("Error creating data channel")
+			log.Error().Err(err).Msg("Failed to create RTP track")
 			return err
 		}
-
-		dataChannel.OnOpen(func() {
-			log.Info().Msgf("Data channel opened!")
-		})
 
 		offer, err := peerConnection.CreateOffer(nil)
 		if err != nil {
@@ -103,7 +129,7 @@ func (c *CaseConnect) Start() error {
 	return nil
 }
 
-func (c *CaseConnect) OnReceiveSignal(signalType PeerSignalType, message []byte) error {
+func (c *CaseVideo) OnReceiveSignal(signalType PeerSignalType, message []byte) error {
 	log.Debug().Msgf("OnReceiveSignal: [%s] %s", signalType, message)
 	if signalType == PeerSignalTypeSDP {
 		sdp := webrtc.SessionDescription{}
@@ -173,6 +199,7 @@ func (c *CaseConnect) OnReceiveSignal(signalType PeerSignalType, message []byte)
 	return errors.New("unrecognized signalType")
 }
 
-func (c *CaseConnect) Stop() {
+func (c *CaseVideo) Stop() {
+	c.statCollector.StopCollection()
 	_ = c.peerConnection.Close()
 }

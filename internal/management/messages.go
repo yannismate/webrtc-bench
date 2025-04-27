@@ -19,6 +19,7 @@ const (
 	MessageTypeStartCaseExecution MessageType = "start_case_execution"
 	MessageTypeStopCaseExecution  MessageType = "stop_case_execution"
 	MessageTypePeerSignal         MessageType = "peer_signal"
+	MessageTypeShutdown           MessageType = "shutdown"
 )
 
 type MessageContainer struct {

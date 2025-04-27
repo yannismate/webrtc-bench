@@ -5,8 +5,10 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
 	"net/http"
+	"os"
 	"time"
 	"webrtc-bench/internal/cases"
+	"webrtc-bench/internal/cases/stats"
 )
 
 type Client interface {
@@ -20,7 +22,8 @@ type client struct {
 	AuthenticationKey string
 	SendChan          chan []byte
 
-	CurrentCase cases.PeerCaseExecutor
+	CurrentCase   cases.PeerCaseExecutor
+	statCollector stats.StatCollector
 }
 
 func NewClient(serverAddress string, clientName string, authenticationKey string) Client {
@@ -28,6 +31,7 @@ func NewClient(serverAddress string, clientName string, authenticationKey string
 		ServerAddress:     serverAddress,
 		ClientName:        clientName,
 		AuthenticationKey: authenticationKey,
+		statCollector:     stats.NewStatCollector(),
 	}
 }
 
@@ -105,6 +109,9 @@ func (c *client) Start() {
 				case MessageTypeRegisterClientOk:
 					log.Info().Msg("Client registration succeeded")
 					c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateRegistered})
+				case MessageTypeShutdown:
+					log.Info().Msg("Orchestrator requested shutdown")
+					os.Exit(0)
 				case MessageTypeConfigureClient:
 					innerMsg := MessageConfigureClient{}
 					err := json.Unmarshal(outerMsg.Data, &innerMsg)
@@ -184,15 +191,18 @@ func (c *client) configureCase(configMsg MessageConfigureClient) {
 	switch configMsg.CaseType {
 	case cases.CaseTypeConnect:
 		c.CurrentCase = &cases.CaseConnect{}
+	case cases.CaseTypeVideo:
+		c.CurrentCase = &cases.CaseVideo{}
 	default:
 		log.Fatal().Msgf("Unrecognized caseType: %s", configMsg.CaseType)
 	}
 
+	c.statCollector.SetInterval(time.Duration(configMsg.Config.StatInterval))
 	err := c.CurrentCase.Configure(configMsg.Config, func(signalType cases.PeerSignalType, data []byte) error {
 		log.Debug().Msgf("OnSendSignal: [%s] %s", signalType, data)
 		c.SendMessage(MessageTypePeerSignal, MessagePeerSignal{SignalType: signalType, Data: data})
 		return nil
-	})
+	}, c.statCollector)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Error configuring case")
 		return
