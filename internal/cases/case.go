@@ -26,7 +26,15 @@ type PeerCaseExecutor interface {
 	Stop()
 }
 
+type PeerImplementation string
+
+const (
+	PeerImplementationPion   PeerImplementation = "pion"
+	PeerImplementationChrome PeerImplementation = "chrome"
+)
+
 type PeerCaseConfig struct {
+	Implementation   PeerImplementation
 	ICEServers       []string
 	SendOffer        bool
 	StatInterval     util.JSONDuration

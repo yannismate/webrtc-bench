@@ -190,9 +190,13 @@ func (c *client) SendMessage(msgType MessageType, content interface{}) {
 func (c *client) configureCase(configMsg MessageConfigureClient) {
 	switch configMsg.CaseType {
 	case cases.CaseTypeConnect:
-		c.CurrentCase = &cases.CaseConnect{}
+		if configMsg.Config.Implementation == cases.PeerImplementationPion {
+			c.CurrentCase = &cases.CaseConnectPion{}
+		} else if configMsg.Config.Implementation == cases.PeerImplementationChrome {
+			c.CurrentCase = &cases.CaseConnectChrome{}
+		}
 	case cases.CaseTypeVideo:
-		c.CurrentCase = &cases.CaseVideo{}
+		c.CurrentCase = &cases.CaseVideoPion{}
 	default:
 		log.Fatal().Msgf("Unrecognized caseType: %s", configMsg.CaseType)
 	}

@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 )
@@ -21,7 +20,7 @@ type Server interface {
 }
 
 type server struct {
-	Port int
+	ListenAddr string
 	// This is not particularly secure over non-HTTPS connections, but it will do for these benchmarks
 	AuthenticationKey         string
 	Clients                   map[string]wsClient
@@ -33,9 +32,9 @@ type wsClient struct {
 	RegisteredAsClient *string
 }
 
-func NewServer(port int, authenticationKey string) Server {
+func NewServer(listenAddr string, authenticationKey string) Server {
 	return &server{
-		Port:                      port,
+		ListenAddr:                listenAddr,
 		AuthenticationKey:         authenticationKey,
 		Clients:                   make(map[string]wsClient),
 		ClientStateUpdateListener: func(string, ClientState) {},
@@ -47,7 +46,7 @@ func (s *server) Start() {
 	mux.HandleFunc("/", s.handleWs)
 
 	httpServer := &http.Server{
-		Addr:    ":" + strconv.Itoa(s.Port),
+		Addr:    s.ListenAddr,
 		Handler: mux,
 	}
 
@@ -63,7 +62,7 @@ func (s *server) Start() {
 		}
 	}()
 	go func() {
-		log.Info().Msgf("Starting control server on port %d", s.Port)
+		log.Info().Msgf("Starting control server on %s", s.ListenAddr)
 		err := httpServer.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal().Err(err).Msg("HTTP server stopped unexpectedly")

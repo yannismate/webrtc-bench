@@ -49,7 +49,7 @@ func main() {
 		return
 	}
 
-	server := management.NewServer(8080, "someAuthenticationKey")
+	server := management.NewServer("127.0.0.1:8080", "someAuthenticationKey")
 	server.Start()
 
 	connectedClients := make(map[string]management.ClientState)
