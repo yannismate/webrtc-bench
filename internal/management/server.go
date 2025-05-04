@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
 	"syscall"
 	"time"
 )
@@ -17,6 +18,7 @@ type Server interface {
 	Start()
 	SetClientStateUpdateListener(func(string, ClientState))
 	SendMessage(clientName string, messageType MessageType, content interface{}) error
+	SetCurrentResultPath(path string)
 }
 
 type server struct {
@@ -25,6 +27,8 @@ type server struct {
 	AuthenticationKey         string
 	Clients                   map[string]wsClient
 	ClientStateUpdateListener func(string, ClientState)
+
+	currentResultPath string
 }
 
 type wsClient struct {
@@ -239,7 +243,57 @@ func (s *server) handleWs(w http.ResponseWriter, r *http.Request) {
 						broadcastClient.SendChan <- msg
 					}
 				}
+			case MessageTypeResults:
+				innerMsg := MessageResults{}
+				err := json.Unmarshal(outerMsg.Data, &innerMsg)
+				if err != nil {
+					log.Error().Err(err).Msg("Could not parse received results message")
+					_ = c.Close()
+					return
+				}
+
+				client := s.Clients[clientId]
+				resultFilePath := path.Join(s.currentResultPath, *client.RegisteredAsClient+".parquet")
+				metadataFilePath := path.Join(s.currentResultPath, *client.RegisteredAsClient+"_meta.json")
+
+				go func() {
+					resultsFile, err := os.Create(resultFilePath)
+					if err != nil {
+						log.Error().Err(err).Msgf("Could not open result file at %s", resultFilePath)
+						return
+					}
+					defer resultsFile.Close()
+
+					_, err = resultsFile.Write(innerMsg.FileData)
+					if err != nil {
+						log.Error().Err(err).Msgf("Could not write to result file")
+						return
+					}
+
+					metadataFile, err := os.Create(metadataFilePath)
+					if err != nil {
+						log.Error().Err(err).Msgf("Could not open metadata file at %s", metadataFilePath)
+						return
+					}
+					defer metadataFile.Close()
+
+					metaBytes, err := json.Marshal(innerMsg.Metadata)
+					if err != nil {
+						log.Error().Err(err).Msg("Could not marshal JSON metadata message")
+						return
+					}
+
+					_, err = metadataFile.Write(metaBytes)
+					if err != nil {
+						log.Error().Err(err).Msgf("Could not write to metadata file")
+						return
+					}
+				}()
 			}
 		}
 	}
+}
+
+func (s *server) SetCurrentResultPath(path string) {
+	s.currentResultPath = path
 }

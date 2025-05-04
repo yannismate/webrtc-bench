@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
+	"io"
 	"net/http"
 	"os"
 	"time"
 	"webrtc-bench/internal/cases"
 	"webrtc-bench/internal/cases/stats"
+	"webrtc-bench/internal/results"
+	"webrtc-bench/internal/util"
 )
 
 type Client interface {
@@ -22,8 +25,9 @@ type client struct {
 	AuthenticationKey string
 	SendChan          chan []byte
 
-	CurrentCase   cases.PeerCaseExecutor
-	statCollector stats.StatCollector
+	CurrentCase         cases.PeerCaseExecutor
+	CurrentResultWriter results.ParquetResultsWriter
+	CurrentCaseMetadata util.TestMetadata
 }
 
 func NewClient(serverAddress string, clientName string, authenticationKey string) Client {
@@ -31,7 +35,6 @@ func NewClient(serverAddress string, clientName string, authenticationKey string
 		ServerAddress:     serverAddress,
 		ClientName:        clientName,
 		AuthenticationKey: authenticationKey,
-		statCollector:     stats.NewStatCollector(),
 	}
 }
 
@@ -144,7 +147,25 @@ func (c *client) Start() {
 					c.CurrentCase.Stop()
 					c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateTestEnding})
 					log.Info().Msg("Case execution stopped")
-					// TODO: send stats
+
+					if c.CurrentResultWriter != nil {
+						file, err := c.CurrentResultWriter.GetResultFile()
+						if err != nil {
+							log.Fatal().Err(err).Msg("Error getting result file")
+							return
+						}
+						fileData, err := io.ReadAll(file)
+						if err != nil {
+							log.Fatal().Err(err).Msg("Error reading result file")
+							return
+						}
+
+						c.SendMessage(MessageTypeResults, MessageResults{
+							Metadata: c.CurrentCaseMetadata,
+							FileData: fileData,
+						})
+					}
+
 					c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateRegistered})
 				case MessageTypePeerSignal:
 					if c.CurrentCase == nil {
@@ -201,12 +222,22 @@ func (c *client) configureCase(configMsg MessageConfigureClient) {
 		log.Fatal().Msgf("Unrecognized caseType: %s", configMsg.CaseType)
 	}
 
-	c.statCollector.SetInterval(time.Duration(configMsg.Config.StatInterval))
-	err := c.CurrentCase.Configure(configMsg.Config, func(signalType cases.PeerSignalType, data []byte) error {
+	resultWriter, err := results.NewParquetResultsWriter()
+	if err != nil {
+		log.Fatal().Err(err).Msg("Could not create parquet results writer")
+		return
+	}
+	c.CurrentResultWriter = resultWriter
+	c.CurrentCaseMetadata = util.GetTestMetadata()
+
+	statCollector := stats.NewStatCollector(resultWriter)
+	statCollector.SetInterval(time.Duration(configMsg.Config.StatInterval))
+
+	err = c.CurrentCase.Configure(configMsg.Config, func(signalType cases.PeerSignalType, data []byte) error {
 		log.Debug().Msgf("OnSendSignal: [%s] %s", signalType, data)
 		c.SendMessage(MessageTypePeerSignal, MessagePeerSignal{SignalType: signalType, Data: data})
 		return nil
-	}, c.statCollector)
+	}, statCollector)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Error configuring case")
 		return

@@ -3,12 +3,14 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"io"
 	"iter"
 	"maps"
 	"os"
+	"path"
 	"sync"
 	"time"
 	"webrtc-bench/internal/cases"
@@ -27,6 +29,7 @@ func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
 
 	caseFilePath := flag.String("cases", "cases.json", "path to cases configuration")
+	resultsFolderPath := flag.String("results", "results", "path to results folder")
 	flag.Parse()
 
 	caseFile, err := os.Open(*caseFilePath)
@@ -81,6 +84,35 @@ func main() {
 				runState = RunStateBeforeTest
 				currentCase++
 			}
+			caseIdentifier := fmt.Sprintf("%s-%s-%d", testCases[currentCase].CaseType, testCases[currentCase].Name, time.Now().Unix())
+			resultsPath := path.Join(*resultsFolderPath, caseIdentifier)
+			err = os.MkdirAll(resultsPath, os.ModePerm)
+			if err != nil {
+				log.Fatal().Err(err).Msg("Failed to create results folder")
+				return
+			}
+			server.SetCurrentResultPath(resultsPath)
+
+			caseFile, err := os.Create(path.Join(resultsPath, fmt.Sprintf("case.json")))
+			if err != nil {
+				log.Fatal().Err(err).Msg("Failed to open case.json")
+				return
+			}
+
+			caseData, err := json.Marshal(testCases[currentCase])
+			if err != nil {
+				log.Fatal().Err(err).Msg("Failed to marshal case for metadata storage")
+				return
+			}
+
+			_, err = caseFile.Write(caseData)
+			if err != nil {
+				log.Fatal().Err(err).Msg("Failed to write case data to case.json")
+				return
+			}
+
+			_ = caseFile.Close()
+
 			log.Info().Msg("Configuring clients")
 			for name, peerConfig := range testCases[currentCase].PeerConfigs {
 				err := server.SendMessage(name, management.MessageTypeConfigureClient, management.MessageConfigureClient{

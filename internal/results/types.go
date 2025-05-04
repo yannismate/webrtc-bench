@@ -1,0 +1,32 @@
+package results
+
+import (
+	"time"
+)
+
+type ResultRow struct {
+	Timestamp   time.Time
+	InboundRTP  ResultRowInboundRTP
+	OutboundRTP ResultRowOutboundRTP
+}
+
+type ResultRowInboundRTP struct {
+	PacketsReceived       uint64
+	PacketsLost           int64
+	Jitter                float64
+	MillisSinceLastPacket uint64
+	HeaderBytesReceived   uint64
+	BytesReceived         uint64
+	FIRCount              uint32
+	PLICount              uint32
+	NACKCount             uint32
+}
+
+type ResultRowOutboundRTP struct {
+	PacketsSent     uint64
+	BytesSent       uint64
+	HeaderBytesSent uint64
+	NACKCount       uint32
+	FIRCount        uint32
+	PLICount        uint32
+}

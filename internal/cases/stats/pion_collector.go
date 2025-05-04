@@ -6,6 +6,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"sync"
 	"time"
+	"webrtc-bench/internal/results"
 )
 
 type StatCollector interface {
@@ -22,9 +23,11 @@ type statCollector struct {
 
 	stopCollection     chan bool
 	stopCollectionOnce sync.Once
+
+	resultWriter results.ParquetResultsWriter
 }
 
-func NewStatCollector() StatCollector {
+func NewStatCollector(resultWriter results.ParquetResultsWriter) StatCollector {
 	statsInterceptorFactory, err := stats.NewInterceptor()
 	if err != nil {
 		log.Fatal().Err(err).Msg("stats.NewInterceptor() failed")
@@ -33,6 +36,7 @@ func NewStatCollector() StatCollector {
 
 	sc := &statCollector{
 		stopCollection: make(chan bool),
+		resultWriter:   resultWriter,
 	}
 
 	statsInterceptorFactory.OnNewPeerConnection(func(_ string, g stats.Getter) {
@@ -65,7 +69,29 @@ func (sc *statCollector) StartCollection(streamID uint32) {
 				return
 			case <-ticker.C:
 				recordedStats := sc.statsGetter.Get(streamID)
-				log.Info().Msgf("stats: %v", recordedStats)
+				now := time.Now()
+				sc.resultWriter.WriteRow(results.ResultRow{
+					Timestamp: now,
+					InboundRTP: results.ResultRowInboundRTP{
+						PacketsReceived:       recordedStats.InboundRTPStreamStats.PacketsReceived,
+						PacketsLost:           recordedStats.InboundRTPStreamStats.PacketsLost,
+						Jitter:                recordedStats.InboundRTPStreamStats.Jitter,
+						MillisSinceLastPacket: uint64(now.Sub(recordedStats.InboundRTPStreamStats.LastPacketReceivedTimestamp).Milliseconds()),
+						HeaderBytesReceived:   recordedStats.InboundRTPStreamStats.HeaderBytesReceived,
+						BytesReceived:         recordedStats.InboundRTPStreamStats.BytesReceived,
+						FIRCount:              recordedStats.InboundRTPStreamStats.FIRCount,
+						PLICount:              recordedStats.InboundRTPStreamStats.PLICount,
+						NACKCount:             recordedStats.InboundRTPStreamStats.NACKCount,
+					},
+					OutboundRTP: results.ResultRowOutboundRTP{
+						PacketsSent:     recordedStats.OutboundRTPStreamStats.PacketsSent,
+						BytesSent:       recordedStats.OutboundRTPStreamStats.BytesSent,
+						HeaderBytesSent: recordedStats.OutboundRTPStreamStats.HeaderBytesSent,
+						NACKCount:       recordedStats.OutboundRTPStreamStats.NACKCount,
+						FIRCount:        recordedStats.OutboundRTPStreamStats.FIRCount,
+						PLICount:        recordedStats.OutboundRTPStreamStats.PLICount,
+					},
+				})
 			}
 		}
 	}()
@@ -75,5 +101,6 @@ func (sc *statCollector) StopCollection() {
 	sc.stopCollectionOnce.Do(func() {
 		sc.stopCollection <- true
 		close(sc.stopCollection)
+		sc.resultWriter.Close()
 	})
 }

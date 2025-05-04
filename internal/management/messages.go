@@ -3,6 +3,7 @@ package management
 import (
 	"encoding/json"
 	"webrtc-bench/internal/cases"
+	"webrtc-bench/internal/util"
 )
 
 const (
@@ -20,6 +21,7 @@ const (
 	MessageTypeStopCaseExecution  MessageType = "stop_case_execution"
 	MessageTypePeerSignal         MessageType = "peer_signal"
 	MessageTypeShutdown           MessageType = "shutdown"
+	MessageTypeResults            MessageType = "results"
 )
 
 type MessageContainer struct {
@@ -55,4 +57,9 @@ type MessageConfigureClient struct {
 type MessagePeerSignal struct {
 	SignalType cases.PeerSignalType
 	Data       []byte
+}
+
+type MessageResults struct {
+	Metadata util.TestMetadata
+	FileData []byte
 }
