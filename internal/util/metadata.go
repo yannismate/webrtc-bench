@@ -1,6 +1,11 @@
 package util
 
 import (
+	"context"
+	"github.com/chromedp/cdproto/browser"
+	"github.com/chromedp/cdproto/cdp"
+	"github.com/chromedp/chromedp"
+	"github.com/rs/zerolog/log"
 	"os"
 	"runtime/debug"
 	"time"
@@ -17,7 +22,7 @@ type TestMetadata struct {
 	Host                  string    `json:"host"`
 }
 
-func GetTestMetadata() TestMetadata {
+func GetPionTestMetadata() TestMetadata {
 	buildInfo, ok := debug.ReadBuildInfo()
 	if !ok {
 		return TestMetadata{}
@@ -36,6 +41,31 @@ func GetTestMetadata() TestMetadata {
 	return TestMetadata{
 		ImplementationType:    "pion",
 		ImplementationVersion: pionVersion,
+		TimeStarted:           time.Now(),
+		Host:                  hostName,
+	}
+}
+
+func GetChromeTestMetadata() TestMetadata {
+	hostName, _ := os.Hostname()
+
+	ctx, cancel := chromedp.NewContext(context.Background())
+	defer cancel()
+
+	err := chromedp.Run(ctx, chromedp.Navigate("about:blank"))
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to start browser to get version")
+	}
+	chromeDpContext := chromedp.FromContext(ctx)
+	_, product, _, _, _, err := browser.GetVersion().Do(cdp.WithExecutor(ctx, chromeDpContext.Target))
+
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get browser version")
+	}
+
+	return TestMetadata{
+		ImplementationType:    "chrome",
+		ImplementationVersion: product,
 		TimeStarted:           time.Now(),
 		Host:                  hostName,
 	}

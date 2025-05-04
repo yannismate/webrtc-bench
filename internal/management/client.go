@@ -228,7 +228,11 @@ func (c *client) configureCase(configMsg MessageConfigureClient) {
 		return
 	}
 	c.CurrentResultWriter = resultWriter
-	c.CurrentCaseMetadata = util.GetTestMetadata()
+	if configMsg.Config.Implementation == cases.PeerImplementationPion {
+		c.CurrentCaseMetadata = util.GetPionTestMetadata()
+	} else {
+		c.CurrentCaseMetadata = util.GetChromeTestMetadata()
+	}
 
 	statCollector := stats.NewStatCollector(resultWriter)
 	statCollector.SetInterval(time.Duration(configMsg.Config.StatInterval))
