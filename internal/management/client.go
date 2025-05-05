@@ -16,6 +16,7 @@ import (
 
 type Client interface {
 	Start()
+	Stop()
 	SendMessage(msgType MessageType, content interface{})
 }
 
@@ -188,6 +189,12 @@ func (c *client) Start() {
 			}
 		}
 	}()
+}
+
+func (c *client) Stop() {
+	if c.CurrentCase != nil {
+		c.CurrentCase.Stop()
+	}
 }
 
 func (c *client) SendMessage(msgType MessageType, content interface{}) {

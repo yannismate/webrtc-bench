@@ -5,6 +5,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"os"
+	"os/signal"
 	"webrtc-bench/internal/management"
 )
 
@@ -23,5 +24,12 @@ func main() {
 	client := management.NewClient("127.0.0.1:8080", *clientName, "someAuthenticationKey")
 	client.Start()
 
-	select {}
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+
+	select {
+	case <-c:
+	}
+	client.Stop()
+	log.Info().Msg("Exiting!")
 }
