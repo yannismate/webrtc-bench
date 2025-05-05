@@ -8,6 +8,8 @@ import (
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 	"github.com/rs/zerolog/log"
+	"os"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,29 +17,58 @@ import (
 	"webrtc-bench/internal/util"
 )
 
-type CaseConnectChrome struct {
+type CaseVideoChrome struct {
 	browserContext       context.Context
 	browserContextCancel context.CancelFunc
 	sendSignal           func(signalType PeerSignalType, data []byte) error
 	chromeSignalMutex    sync.Mutex
 }
 
-//go:embed chrome_connect.js
-var caseConnectJs string
+//go:embed chrome_video.js
+var caseVideoJs string
 
-func (c *CaseConnectChrome) Configure(config PeerCaseConfig, sendSignal func(signalType PeerSignalType, data []byte) error, statCollector stats.StatCollector) error {
+func (c *CaseVideoChrome) Configure(config PeerCaseConfig, sendSignal func(signalType PeerSignalType, data []byte) error, statCollector stats.StatCollector) error {
 	c.browserContext, c.browserContextCancel = chromedp.NewContext(context.Background())
 	c.sendSignal = sendSignal
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	videoFilePath, ok := config.AdditionalConfig["video_file"]
+	if !ok {
+		videoFilePath = path.Join("testdata", "test.y4m")
+	}
+
+	opts := append(chromedp.DefaultExecAllocatorOptions[3:],
+		chromedp.NoFirstRun,
+		chromedp.NoDefaultBrowserCheck,
+		chromedp.Flag("allow-file-access-from-files", "true"),
+		chromedp.Flag("disable-gesture-requirement-for-media-playback", "true"),
+		chromedp.Flag("use-fake-ui-for-media-stream", "true"),
+		chromedp.Flag("use-fake-device-for-media-stream", "true"),
+		chromedp.Flag("use-file-for-fake-video-capture", path.Join(cwd, videoFilePath)),
+	)
+
+	parentCtx, parentCtxCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	browserContext, browserContextCancel := chromedp.NewContext(parentCtx)
+
+	c.browserContext = browserContext
+	c.browserContextCancel = func() {
+		browserContextCancel()
+		parentCtxCancel()
+	}
 
 	setParamsJs := "const ICE_SERVERS = [\"" + strings.Join(config.ICEServers, "\", \"") + "\"];\n"
 	setParamsJs += "const DO_OFFER = " + strconv.FormatBool(config.SendOffer) + ";"
 
 	var res []string
-	err := chromedp.Run(c.browserContext,
-		chromedp.Navigate("about:blank"),
+	err = chromedp.Run(c.browserContext,
+		chromedp.Navigate("file://"+path.Join(cwd, "testdata", "empty_page.html")),
 		util.ExposeFunc("sendManagementMessage", c.browserMessage),
 		chromedp.EvaluateAsDevTools(setParamsJs, &res),
-		chromedp.EvaluateAsDevTools(caseConnectJs, &res))
+		chromedp.EvaluateAsDevTools(caseVideoJs, &res))
 	if err != nil {
 		return err
 	}
@@ -45,12 +76,7 @@ func (c *CaseConnectChrome) Configure(config PeerCaseConfig, sendSignal func(sig
 	return nil
 }
 
-type browserMessage struct {
-	Type  string `json:"type"`
-	Value string `json:"value"`
-}
-
-func (c *CaseConnectChrome) browserMessage(msgText string) {
+func (c *CaseVideoChrome) browserMessage(msgText string) {
 	var msg browserMessage
 	err := json.Unmarshal([]byte(msgText), &msg)
 	if err != nil {
@@ -76,7 +102,7 @@ func (c *CaseConnectChrome) browserMessage(msgText string) {
 	}
 }
 
-func (c *CaseConnectChrome) Start() error {
+func (c *CaseVideoChrome) Start() error {
 	var res []string
 	err := chromedp.Run(c.browserContext,
 		chromedp.EvaluateAsDevTools("start();", &res, func(params *runtime.EvaluateParams) *runtime.EvaluateParams {
@@ -90,7 +116,7 @@ func (c *CaseConnectChrome) Start() error {
 	return nil
 }
 
-func (c *CaseConnectChrome) OnReceiveSignal(signalType PeerSignalType, message []byte) error {
+func (c *CaseVideoChrome) OnReceiveSignal(signalType PeerSignalType, message []byte) error {
 	functionCall := fmt.Sprintf("receiveManagementMessage(%q, %q);", signalType, string(message))
 
 	c.chromeSignalMutex.Lock()
@@ -109,7 +135,7 @@ func (c *CaseConnectChrome) OnReceiveSignal(signalType PeerSignalType, message [
 	return nil
 }
 
-func (c *CaseConnectChrome) Stop() {
+func (c *CaseVideoChrome) Stop() {
 	var res []string
 	err := chromedp.Run(c.browserContext,
 		chromedp.EvaluateAsDevTools("stop();", &res, func(params *runtime.EvaluateParams) *runtime.EvaluateParams {

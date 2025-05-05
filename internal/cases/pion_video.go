@@ -87,10 +87,9 @@ func (c *CaseVideoPion) Start() error {
 		if desc == nil {
 			c.pendingCandidates = append(c.pendingCandidates, candidate)
 		}
-		payload := []byte(candidate.ToJSON().Candidate)
-		err := c.sendSignal(PeerSignalTypeCandidates, payload)
+		err := c.sendCandidate(candidate)
 		if err != nil {
-			log.Error().Err(err).Msgf("Error sending candidates signal")
+			log.Error().Err(err).Msg("Failed to send candidate")
 		}
 	})
 
@@ -161,10 +160,10 @@ func (c *CaseVideoPion) OnReceiveSignal(signalType PeerSignalType, message []byt
 
 		if sdp.Type == webrtc.SDPTypeAnswer {
 			for _, cand := range c.pendingCandidates {
-				payload := []byte(cand.ToJSON().Candidate)
-				err := c.sendSignal(PeerSignalTypeCandidates, payload)
+				err := c.sendCandidate(cand)
 				if err != nil {
-					log.Error().Err(err).Msgf("Error sending candidates signal")
+					log.Error().Err(err).Msg("Failed to send candidate")
+					return err
 				}
 			}
 			return nil
@@ -195,15 +194,22 @@ func (c *CaseVideoPion) OnReceiveSignal(signalType PeerSignalType, message []byt
 		}
 
 		for _, cand := range c.pendingCandidates {
-			payload := []byte(cand.ToJSON().Candidate)
-			err := c.sendSignal(PeerSignalTypeCandidates, payload)
+			err := c.sendCandidate(cand)
 			if err != nil {
-				log.Error().Err(err).Msgf("Error sending candidates signal")
+				log.Error().Err(err).Msg("Failed to send candidate")
+				return err
 			}
 		}
 		return nil
 	} else if signalType == PeerSignalTypeCandidates {
-		err := c.peerConnection.AddICECandidate(webrtc.ICECandidateInit{Candidate: string(message)})
+		candidate := webrtc.ICECandidateInit{}
+		err := json.Unmarshal(message, &candidate)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to unmarshal candidate")
+			return err
+		}
+
+		err = c.peerConnection.AddICECandidate(candidate)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to add received ICECandidate")
 			return err
@@ -211,6 +217,19 @@ func (c *CaseVideoPion) OnReceiveSignal(signalType PeerSignalType, message []byt
 		return nil
 	}
 	return errors.New("unrecognized signalType")
+}
+
+func (c *CaseVideoPion) sendCandidate(cand *webrtc.ICECandidate) error {
+	payload, err := json.Marshal(cand.ToJSON())
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to marshal candidate")
+	}
+	err = c.sendSignal(PeerSignalTypeCandidates, payload)
+	if err != nil {
+		log.Error().Err(err).Msgf("Error sending candidates signal")
+	}
+
+	return nil
 }
 
 func (c *CaseVideoPion) Stop() {

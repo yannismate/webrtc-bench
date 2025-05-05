@@ -209,17 +209,26 @@ func (c *client) SendMessage(msgType MessageType, content interface{}) {
 }
 
 func (c *client) configureCase(configMsg MessageConfigureClient) {
-	switch configMsg.CaseType {
-	case cases.CaseTypeConnect:
-		if configMsg.Config.Implementation == cases.PeerImplementationPion {
+	if configMsg.Config.Implementation == cases.PeerImplementationPion {
+		c.CurrentCaseMetadata = util.GetPionTestMetadata()
+		switch configMsg.CaseType {
+		case cases.CaseTypeConnect:
 			c.CurrentCase = &cases.CaseConnectPion{}
-		} else if configMsg.Config.Implementation == cases.PeerImplementationChrome {
-			c.CurrentCase = &cases.CaseConnectChrome{}
+		case cases.CaseTypeVideo:
+			c.CurrentCase = &cases.CaseVideoPion{}
+		default:
+			log.Fatal().Msgf("Unrecognized caseType: %s", configMsg.CaseType)
 		}
-	case cases.CaseTypeVideo:
-		c.CurrentCase = &cases.CaseVideoPion{}
-	default:
-		log.Fatal().Msgf("Unrecognized caseType: %s", configMsg.CaseType)
+	} else if configMsg.Config.Implementation == cases.PeerImplementationChrome {
+		c.CurrentCaseMetadata = util.GetChromeTestMetadata()
+		switch configMsg.CaseType {
+		case cases.CaseTypeConnect:
+			c.CurrentCase = &cases.CaseConnectChrome{}
+		case cases.CaseTypeVideo:
+			c.CurrentCase = &cases.CaseVideoChrome{}
+		default:
+			log.Fatal().Msgf("Unrecognized caseType: %s", configMsg.CaseType)
+		}
 	}
 
 	resultWriter, err := results.NewParquetResultsWriter()
@@ -228,11 +237,6 @@ func (c *client) configureCase(configMsg MessageConfigureClient) {
 		return
 	}
 	c.CurrentResultWriter = resultWriter
-	if configMsg.Config.Implementation == cases.PeerImplementationPion {
-		c.CurrentCaseMetadata = util.GetPionTestMetadata()
-	} else {
-		c.CurrentCaseMetadata = util.GetChromeTestMetadata()
-	}
 
 	statCollector := stats.NewStatCollector(resultWriter)
 	statCollector.SetInterval(time.Duration(configMsg.Config.StatInterval))

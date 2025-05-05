@@ -65,7 +65,6 @@ func (sc *statCollector) StartCollection(streamID uint32) {
 				return
 			case <-ticker.C:
 				recordedStats := sc.statsGetter.Get(streamID)
-				log.Info().Msgf("stats: %v", recordedStats)
 				now := time.Now()
 				sc.resultWriter.WriteRow(results.ResultRow{
 					Timestamp: now,
