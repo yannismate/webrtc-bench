@@ -1,7 +1,6 @@
 package stats
 
 import (
-	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/rs/zerolog/log"
 	"sync"
@@ -10,16 +9,16 @@ import (
 )
 
 type StatCollector interface {
-	GetInterceptorRegistry() *interceptor.Registry
+	GetPionInterceptorFactory() *stats.InterceptorFactory
 	SetInterval(interval time.Duration)
 	StartCollection(streamID uint32)
 	StopCollection()
 }
 
 type statCollector struct {
-	statsGetter         stats.Getter
-	interceptorRegistry *interceptor.Registry
-	collectionInterval  time.Duration
+	statsGetter             stats.Getter
+	statsInterceptorFactory *stats.InterceptorFactory
+	collectionInterval      time.Duration
 
 	stopCollection     chan bool
 	stopCollectionOnce sync.Once
@@ -43,16 +42,13 @@ func NewStatCollector(resultWriter results.ParquetResultsWriter) StatCollector {
 		sc.statsGetter = g
 	})
 
-	interceptorRegistry := &interceptor.Registry{}
-	interceptorRegistry.Add(statsInterceptorFactory)
-
-	sc.interceptorRegistry = interceptorRegistry
+	sc.statsInterceptorFactory = statsInterceptorFactory
 
 	return sc
 }
 
-func (sc *statCollector) GetInterceptorRegistry() *interceptor.Registry {
-	return sc.interceptorRegistry
+func (sc *statCollector) GetPionInterceptorFactory() *stats.InterceptorFactory {
+	return sc.statsInterceptorFactory
 }
 
 func (sc *statCollector) SetInterval(interval time.Duration) {
@@ -69,6 +65,7 @@ func (sc *statCollector) StartCollection(streamID uint32) {
 				return
 			case <-ticker.C:
 				recordedStats := sc.statsGetter.Get(streamID)
+				log.Info().Msgf("stats: %v", recordedStats)
 				now := time.Now()
 				sc.resultWriter.WriteRow(results.ResultRow{
 					Timestamp: now,

@@ -35,8 +35,7 @@ func (c *CaseConnectPion) Configure(config PeerCaseConfig, sendSignal func(signa
 }
 
 func (c *CaseConnectPion) Start() error {
-	api := webrtc.NewAPI(webrtc.WithInterceptorRegistry(c.statCollector.GetInterceptorRegistry()))
-	peerConnection, err := api.NewPeerConnection(c.webrtcCfg)
+	peerConnection, err := webrtc.NewPeerConnection(c.webrtcCfg)
 	c.peerConnection = peerConnection
 	if err != nil {
 		return err

@@ -3,6 +3,7 @@ package cases
 import (
 	"encoding/json"
 	"errors"
+	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v4"
 	"github.com/rs/zerolog/log"
 	"sync"
@@ -40,7 +41,20 @@ func (c *CaseVideoPion) Configure(config PeerCaseConfig, sendSignal func(signalT
 }
 
 func (c *CaseVideoPion) Start() error {
-	api := webrtc.NewAPI(webrtc.WithInterceptorRegistry(c.statCollector.GetInterceptorRegistry()))
+	mediaEngine := webrtc.MediaEngine{}
+	err := mediaEngine.RegisterDefaultCodecs()
+	if err != nil {
+		return err
+	}
+
+	icRegistry := interceptor.Registry{}
+	err = webrtc.RegisterDefaultInterceptors(&mediaEngine, &icRegistry)
+	if err != nil {
+		return err
+	}
+	icRegistry.Add(c.statCollector.GetPionInterceptorFactory())
+
+	api := webrtc.NewAPI(webrtc.WithMediaEngine(&mediaEngine), webrtc.WithInterceptorRegistry(&icRegistry))
 	peerConnection, err := api.NewPeerConnection(c.webrtcCfg)
 	c.peerConnection = peerConnection
 	if err != nil {
