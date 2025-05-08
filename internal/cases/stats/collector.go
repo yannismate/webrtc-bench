@@ -21,6 +21,7 @@ type statCollector struct {
 	statsInterceptorFactory *stats.InterceptorFactory
 	collectionInterval      time.Duration
 
+	usingStopChannel   bool
 	stopCollection     chan bool
 	stopCollectionOnce sync.Once
 
@@ -62,6 +63,7 @@ func (sc *statCollector) RecordRow(row results.ResultRow) {
 
 func (sc *statCollector) StartCollection(streamID uint32) {
 	go func() {
+		sc.usingStopChannel = true
 		ticker := time.NewTicker(sc.collectionInterval)
 		defer ticker.Stop()
 		for {
@@ -100,8 +102,10 @@ func (sc *statCollector) StartCollection(streamID uint32) {
 
 func (sc *statCollector) StopCollection() {
 	sc.stopCollectionOnce.Do(func() {
-		sc.stopCollection <- true
-		close(sc.stopCollection)
+		if sc.usingStopChannel {
+			sc.stopCollection <- true
+			close(sc.stopCollection)
+		}
 		sc.resultWriter.Close()
 	})
 }

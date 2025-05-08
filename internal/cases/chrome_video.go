@@ -157,5 +157,6 @@ func (c *CaseVideoChrome) Stop() {
 		log.Warn().Err(err).Msg("Failed to stop case in Chrome")
 	}
 
+	c.statCollector.StopCollection()
 	c.browserContextCancel()
 }
