@@ -11,15 +11,22 @@ type ResultRow struct {
 }
 
 type ResultRowInboundRTP struct {
-	PacketsReceived       uint64
-	PacketsLost           int64
-	Jitter                float64
-	MillisSinceLastPacket uint64
-	HeaderBytesReceived   uint64
-	BytesReceived         uint64
-	FIRCount              uint32
-	PLICount              uint32
-	NACKCount             uint32
+	PacketsReceived              uint64
+	PacketsLost                  int64
+	Jitter                       float64
+	MillisSinceLastPacket        uint64
+	HeaderBytesReceived          uint64
+	BytesReceived                uint64
+	FIRCount                     uint32
+	PLICount                     uint32
+	NACKCount                    uint32
+	FramesReceived               *uint64
+	FramesDropped                *uint64
+	KeyFramesDecoded             *uint32
+	FreezeCount                  *uint32
+	TotalFreezesDuration         *uint32
+	RetransmittedBytesReceived   *uint64
+	RetransmittedPacketsReceived *uint64
 }
 
 type ResultRowOutboundRTP struct {
@@ -29,4 +36,6 @@ type ResultRowOutboundRTP struct {
 	NACKCount       uint32
 	FIRCount        uint32
 	PLICount        uint32
+	FramesSent      *uint64
+	TargetBitrate   *uint32
 }

@@ -1,5 +1,6 @@
 const iceServers = ICE_SERVERS.map((iceUrl) => ({urls: iceUrl}));
 const doOffer = DO_OFFER;
+const statIntervalMs = STAT_INTERVAL_MS;
 
 function log(msg) {
     if (msg instanceof String) {
@@ -44,6 +45,7 @@ peerConnection.ontrack = ({ streams: [ stream ] }) => {
     };
 };
 
+let statInterval;
 
 async function start() {
     if (doOffer) {
@@ -57,18 +59,51 @@ async function start() {
         sendManagementMessage(JSON.stringify({type: "sdp", value: JSON.stringify(offer)}))
     }
 
-    setInterval(() => {
+    statInterval = setInterval(() => {
         peerConnection.getStats().then(allStats => {
+            const statData = {};
             allStats.forEach(stats => {
-                if (stats.type === "inbound-rtp" || stats.type === "outbound-rtp") {
-                    log(stats);
+                if (stats.type === "inbound-rtp") {
+                    statData.timestamp = new Date(Math.round(stats.timestamp)).toISOString();
+                    statData.inboundRtp = {
+                        packetsReceived: stats.packetsReceived,
+                        packetsLost: stats.packetsLost,
+                        jitter: stats.jitter,
+                        millisSinceLastPacket: Date.now() - Math.floor(stats.lastPacketReceivedTimestamp),
+                        bytesReceived: stats.bytesReceived,
+                        headerBytesReceived: stats.headerBytesReceived,
+                        firCount: stats.firCount,
+                        pliCount: stats.pliCount,
+                        nackCount: stats.nackCount,
+                        framesReceived: stats.framesReceived,
+                        framesDropped: stats.framesDropped,
+                        keyFramesDecoded: stats.keyFramesDecoded,
+                        freezeCount: stats.freezeCount,
+                        totalFreezesDuration: stats.totalFreezesDuration,
+                        retransmittedBytesReceived: stats.retransmittedBytesReceived,
+                        retransmittedPacketsReceived: stats.retransmittedPacketsReceived
+                    };
+                } else if (stats.type === "outbound-rtp") {
+                    statData.timestamp = new Date(Math.round(stats.timestamp)).toISOString();
+                    statData.outboundRtp = {
+                        packetsSent: stats.packetsSent,
+                        bytesSent: stats.bytesSent,
+                        headerBytesSent: stats.headerBytesSent,
+                        nackCount: stats.nackCount,
+                        firCount: stats.firCount,
+                        pliCount: stats.pliCount,
+                        framesSent: stats.framesSent,
+                        targetBitrate: stats.targetBitrate
+                    };
                 }
             });
+            sendManagementMessage(JSON.stringify({type: "stats", value: JSON.stringify(statData)}))
         });
-    }, 1000);
+    }, statIntervalMs);
 }
 
 async function stop() {
+    clearInterval(statInterval);
     peerConnection.close();
 }
 

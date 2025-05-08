@@ -13,7 +13,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"webrtc-bench/internal/cases/stats"
+	"webrtc-bench/internal/results"
 	"webrtc-bench/internal/util"
 )
 
@@ -22,6 +24,7 @@ type CaseVideoChrome struct {
 	browserContextCancel context.CancelFunc
 	sendSignal           func(signalType PeerSignalType, data []byte) error
 	chromeSignalMutex    sync.Mutex
+	statCollector        stats.StatCollector
 }
 
 //go:embed chrome_video.js
@@ -30,6 +33,7 @@ var caseVideoJs string
 func (c *CaseVideoChrome) Configure(config PeerCaseConfig, sendSignal func(signalType PeerSignalType, data []byte) error, statCollector stats.StatCollector) error {
 	c.browserContext, c.browserContextCancel = chromedp.NewContext(context.Background())
 	c.sendSignal = sendSignal
+	c.statCollector = statCollector
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -41,9 +45,7 @@ func (c *CaseVideoChrome) Configure(config PeerCaseConfig, sendSignal func(signa
 		videoFilePath = path.Join("testdata", "test.y4m")
 	}
 
-	opts := append(chromedp.DefaultExecAllocatorOptions[3:],
-		chromedp.NoFirstRun,
-		chromedp.NoDefaultBrowserCheck,
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("allow-file-access-from-files", "true"),
 		chromedp.Flag("disable-gesture-requirement-for-media-playback", "true"),
 		chromedp.Flag("use-fake-ui-for-media-stream", "true"),
@@ -61,7 +63,8 @@ func (c *CaseVideoChrome) Configure(config PeerCaseConfig, sendSignal func(signa
 	}
 
 	setParamsJs := "const ICE_SERVERS = [\"" + strings.Join(config.ICEServers, "\", \"") + "\"];\n"
-	setParamsJs += "const DO_OFFER = " + strconv.FormatBool(config.SendOffer) + ";"
+	setParamsJs += "const DO_OFFER = " + strconv.FormatBool(config.SendOffer) + ";\n"
+	setParamsJs += "const STAT_INTERVAL_MS = " + strconv.FormatInt(time.Duration(config.StatInterval).Milliseconds(), 10) + ";"
 
 	var res []string
 	err = chromedp.Run(c.browserContext,
@@ -99,6 +102,15 @@ func (c *CaseVideoChrome) browserMessage(msgText string) {
 			log.Error().Err(err).Str("msg", msg.Value).Msg("Error sending signal")
 			return
 		}
+	case "stats":
+		var statLine results.ResultRow
+		err := json.Unmarshal([]byte(msg.Value), &statLine)
+		if err != nil {
+			log.Error().Err(err).Str("msg", msg.Value).Msg("Error unmarshalling stats")
+			return
+		}
+
+		c.statCollector.RecordRow(statLine)
 	}
 }
 

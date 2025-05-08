@@ -13,6 +13,7 @@ type StatCollector interface {
 	SetInterval(interval time.Duration)
 	StartCollection(streamID uint32)
 	StopCollection()
+	RecordRow(row results.ResultRow)
 }
 
 type statCollector struct {
@@ -53,6 +54,10 @@ func (sc *statCollector) GetPionInterceptorFactory() *stats.InterceptorFactory {
 
 func (sc *statCollector) SetInterval(interval time.Duration) {
 	sc.collectionInterval = interval
+}
+
+func (sc *statCollector) RecordRow(row results.ResultRow) {
+	sc.resultWriter.WriteRow(row)
 }
 
 func (sc *statCollector) StartCollection(streamID uint32) {

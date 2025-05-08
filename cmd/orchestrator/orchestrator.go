@@ -138,6 +138,8 @@ func main() {
 			}
 			go func() {
 				time.Sleep(time.Duration(testCases[currentCase].Duration))
+				clientStateLock.Lock()
+				defer clientStateLock.Unlock()
 				runState = RunStateAfterTest
 				log.Info().Msg("Stopping test case")
 				for name, _ := range testCases[currentCase].PeerConfigs {
