@@ -72,6 +72,7 @@ func main() {
 
 			if runState == RunStateAfterTest {
 				if currentCase == len(testCases)-1 {
+					server.SetShuttingDown()
 					log.Info().Msgf("Finished last test case! Shutting down clients.")
 					for cn, _ := range connectedClients {
 						_ = server.SendMessage(cn, management.MessageTypeShutdown, nil)

@@ -19,6 +19,7 @@ type Server interface {
 	SetClientStateUpdateListener(func(string, ClientState))
 	SendMessage(clientName string, messageType MessageType, content interface{}) error
 	SetCurrentResultPath(path string)
+	SetShuttingDown()
 }
 
 type server struct {
@@ -28,6 +29,7 @@ type server struct {
 	Clients                   map[string]wsClient
 	ClientStateUpdateListener func(string, ClientState)
 
+	shuttingDown      bool
 	currentResultPath string
 }
 
@@ -42,6 +44,7 @@ func NewServer(listenAddr string, authenticationKey string) Server {
 		AuthenticationKey:         authenticationKey,
 		Clients:                   make(map[string]wsClient),
 		ClientStateUpdateListener: func(string, ClientState) {},
+		shuttingDown:              false,
 	}
 }
 
@@ -86,6 +89,10 @@ func (s *server) getPeerByName(name string) (wsClient, bool) {
 		}
 	}
 	return wsClient{}, false
+}
+
+func (s *server) SetShuttingDown() {
+	s.shuttingDown = true
 }
 
 func (s *server) SendMessage(clientName string, msgType MessageType, content interface{}) error {
@@ -164,7 +171,7 @@ func (s *server) handleWs(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			case <-ticker.C:
-				_ = c.SetWriteDeadline(time.Now().Add(time.Second * 3))
+				_ = c.SetWriteDeadline(time.Now().Add(time.Second * 10))
 				if err := c.WriteMessage(websocket.PingMessage, nil); err != nil {
 					_ = c.Close()
 					log.Warn().Err(err).Msg("Could not ping client, closing connection...")
@@ -178,15 +185,15 @@ func (s *server) handleWs(w http.ResponseWriter, r *http.Request) {
 		msgType, msg, err := c.ReadMessage()
 		if err != nil {
 			_ = c.Close()
-			log.Warn().Err(err).Msg("Could not read WS")
+			if !s.shuttingDown {
+				log.Warn().Err(err).Msg("Could not read WS")
+			}
 			return
 		}
 		switch msgType {
 		case websocket.CloseMessage:
 			_ = c.Close()
 			return
-		case websocket.PingMessage:
-			_ = c.WriteMessage(websocket.PongMessage, nil)
 		case websocket.BinaryMessage:
 			outerMsg := MessageContainer{}
 			err := json.Unmarshal(msg, &outerMsg)

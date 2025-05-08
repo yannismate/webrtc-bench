@@ -74,7 +74,7 @@ func (c *client) Start() {
 					return
 				}
 			case <-ticker.C:
-				_ = conn.SetWriteDeadline(time.Now().Add(time.Second * 3))
+				_ = conn.SetWriteDeadline(time.Now().Add(time.Second * 10))
 				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 					_ = conn.Close()
 					log.Warn().Err(err).Msg("Could not ping client, closing connection...")
@@ -93,100 +93,96 @@ func (c *client) Start() {
 				return
 			}
 
-			switch msgType {
-			case websocket.PingMessage:
-				err = conn.WriteMessage(websocket.PongMessage, nil)
+			if msgType != websocket.BinaryMessage {
+				continue
+			}
+
+			outerMsg := MessageContainer{}
+			err = json.Unmarshal(msg, &outerMsg)
+			if err != nil {
+				log.Warn().Err(err).Msg("Could not parse received WS message")
+				_ = conn.Close()
+				return
+			}
+
+			switch outerMsg.MessageType {
+			case MessageTypeRegisterClientOk:
+				log.Info().Msg("Client registration succeeded")
+				c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateRegistered})
+			case MessageTypeShutdown:
+				log.Info().Msg("Orchestrator requested shutdown")
+				os.Exit(0)
+			case MessageTypeConfigureClient:
+				innerMsg := MessageConfigureClient{}
+				err := json.Unmarshal(outerMsg.Data, &innerMsg)
 				if err != nil {
-					log.Error().Err(err).Msg("Error writing to Management WS")
-					return
-				}
-			case websocket.BinaryMessage:
-				outerMsg := MessageContainer{}
-				err := json.Unmarshal(msg, &outerMsg)
-				if err != nil {
-					log.Warn().Err(err).Msg("Could not parse received WS message")
+					log.Warn().Err(err).Msg("Could not parse received inner WS message")
 					_ = conn.Close()
 					return
 				}
+				c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateConfiguring})
+				c.configureCase(innerMsg)
+				c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateTestReady})
+			case MessageTypeStartCaseExecution:
+				if c.CurrentCase == nil {
+					log.Error().Msg("Cannot start execution, no case configured!")
+					continue
+				}
+				err := c.CurrentCase.Start()
+				c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateTesting})
+				log.Info().Msg("Case execution started")
+				if err != nil {
+					log.Warn().Err(err).Msg("Error while starting case execution")
+					_ = conn.Close()
+					return
+				}
+			case MessageTypeStopCaseExecution:
+				if c.CurrentCase == nil {
+					log.Error().Msg("Cannot stop execution, no case configured!")
+					continue
+				}
+				c.CurrentCase.Stop()
+				c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateTestEnding})
+				log.Info().Msg("Case execution stopped")
 
-				switch outerMsg.MessageType {
-				case MessageTypeRegisterClientOk:
-					log.Info().Msg("Client registration succeeded")
-					c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateRegistered})
-				case MessageTypeShutdown:
-					log.Info().Msg("Orchestrator requested shutdown")
-					os.Exit(0)
-				case MessageTypeConfigureClient:
-					innerMsg := MessageConfigureClient{}
-					err := json.Unmarshal(outerMsg.Data, &innerMsg)
+				if c.CurrentResultWriter != nil {
+					file, err := c.CurrentResultWriter.GetResultFile()
 					if err != nil {
-						log.Warn().Err(err).Msg("Could not parse received inner WS message")
-						_ = conn.Close()
+						log.Fatal().Err(err).Msg("Error getting result file")
 						return
 					}
-					c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateConfiguring})
-					c.configureCase(innerMsg)
-					c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateTestReady})
-				case MessageTypeStartCaseExecution:
-					if c.CurrentCase == nil {
-						log.Error().Msg("Cannot start execution, no case configured!")
-						continue
-					}
-					err := c.CurrentCase.Start()
-					c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateTesting})
-					log.Info().Msg("Case execution started")
+					fileData, err := io.ReadAll(file)
 					if err != nil {
-						log.Warn().Err(err).Msg("Error while starting case execution")
-						_ = conn.Close()
+						log.Fatal().Err(err).Msg("Error reading result file")
 						return
 					}
-				case MessageTypeStopCaseExecution:
-					if c.CurrentCase == nil {
-						log.Error().Msg("Cannot stop execution, no case configured!")
-						continue
-					}
-					c.CurrentCase.Stop()
-					c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateTestEnding})
-					log.Info().Msg("Case execution stopped")
 
-					if c.CurrentResultWriter != nil {
-						file, err := c.CurrentResultWriter.GetResultFile()
-						if err != nil {
-							log.Fatal().Err(err).Msg("Error getting result file")
-							return
-						}
-						fileData, err := io.ReadAll(file)
-						if err != nil {
-							log.Fatal().Err(err).Msg("Error reading result file")
-							return
-						}
+					c.SendMessage(MessageTypeResults, MessageResults{
+						Metadata: c.CurrentCaseMetadata,
+						FileData: fileData,
+					})
+				}
 
-						c.SendMessage(MessageTypeResults, MessageResults{
-							Metadata: c.CurrentCaseMetadata,
-							FileData: fileData,
-						})
-					}
-
-					c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateRegistered})
-				case MessageTypePeerSignal:
-					if c.CurrentCase == nil {
-						log.Error().Msg("Cannot receive peer signal, no case configured!")
-						continue
-					}
-					innerMsg := MessagePeerSignal{}
-					err := json.Unmarshal(outerMsg.Data, &innerMsg)
-					if err != nil {
-						log.Warn().Err(err).Msg("Could not parse received inner WS message")
-						_ = conn.Close()
-						return
-					}
-					err = c.CurrentCase.OnReceiveSignal(innerMsg.SignalType, innerMsg.Data)
-					if err != nil {
-						log.Error().Err(err).Msg("Error while handling peer signal")
-						return
-					}
+				c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateRegistered})
+			case MessageTypePeerSignal:
+				if c.CurrentCase == nil {
+					log.Error().Msg("Cannot receive peer signal, no case configured!")
+					continue
+				}
+				innerMsg := MessagePeerSignal{}
+				err := json.Unmarshal(outerMsg.Data, &innerMsg)
+				if err != nil {
+					log.Warn().Err(err).Msg("Could not parse received inner WS message")
+					_ = conn.Close()
+					return
+				}
+				err = c.CurrentCase.OnReceiveSignal(innerMsg.SignalType, innerMsg.Data)
+				if err != nil {
+					log.Error().Err(err).Msg("Error while handling peer signal")
+					return
 				}
 			}
+
 		}
 	}()
 }
