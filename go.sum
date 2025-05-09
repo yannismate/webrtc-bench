@@ -32,6 +32,8 @@ github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D
 github.com/mattn/go-runewidth v0.0.9/go.mod h1:H031xJmbD/WCDINGzjvQ9THkh0rPKHF+m2gUSrubnMI=
 github.com/mattn/go-runewidth v0.0.15 h1:UNAjwbU9l54TA3KzvqLGxwWjHmMgBUVhBiTjelZgg3U=
 github.com/mattn/go-runewidth v0.0.15/go.mod h1:Jdepj2loyihRzMpdS35Xk/zdY8IAYHsh153qUoGf23w=
+github.com/mengelbart/scream-go v0.4.0 h1:XrjtTXDZw38yZAVRJI5c4Ysz1gjcFwj62mdOqTVQRE0=
+github.com/mengelbart/scream-go v0.4.0/go.mod h1:Yre6kUFLW62SKaIjBBZF/E93fEBqcCqn6bZyrjljd5k=
 github.com/mengelbart/syncodec v0.0.0-20220105132658-94ec57e63a65 h1:YesVi8KQzZ9tFu6p3NTU77xA3/8N2C11IDuk/7sV5uI=
 github.com/mengelbart/syncodec v0.0.0-20220105132658-94ec57e63a65/go.mod h1:xSNXCRAUe6VZ/3cIYLvelP33gCTh3PLVbckdgcCeV+U=
 github.com/olekukonko/tablewriter v0.0.5 h1:P2Ga83D34wi1o9J6Wh1mRuqd4mF/x/lgBS7N7AbDhec=

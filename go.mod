@@ -19,6 +19,7 @@ require (
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.15 // indirect
+	github.com/mengelbart/scream-go v0.4.0 // indirect
 	github.com/mengelbart/syncodec v0.0.0-20220105132658-94ec57e63a65 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
 	github.com/parquet-go/parquet-go v0.25.0 // indirect

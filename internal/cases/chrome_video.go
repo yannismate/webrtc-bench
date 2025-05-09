@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
@@ -48,6 +49,11 @@ func (c *CaseVideoChrome) Configure(config PeerCaseConfig, sendSignal func(signa
 	bitrateStr, ok := config.AdditionalConfig["bitrate"]
 	if !ok {
 		bitrateStr = "10000"
+	}
+
+	_, ok = config.AdditionalConfig["congestion_control"]
+	if ok {
+		return errors.New("chrome test case does not support custom congestion_control")
 	}
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],

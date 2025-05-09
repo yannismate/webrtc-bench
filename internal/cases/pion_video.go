@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pion/interceptor"
+	"github.com/pion/interceptor/pkg/cc"
+	"github.com/pion/interceptor/pkg/gcc"
 	"github.com/pion/webrtc/v4"
 	"github.com/rs/zerolog/log"
 	"strconv"
@@ -11,13 +13,16 @@ import (
 	"time"
 	"webrtc-bench/internal/cases/stats"
 	"webrtc-bench/internal/cases/testsource"
+	"webrtc-bench/internal/pion/scream"
 )
 
 type CaseVideoPion struct {
-	sendSignal     func(signalType PeerSignalType, data []byte) error
-	webrtcCfg      webrtc.Configuration
-	sendOffer      bool
-	peerConnection *webrtc.PeerConnection
+	sendSignal            func(signalType PeerSignalType, data []byte) error
+	webrtcCfg             webrtc.Configuration
+	sendOffer             bool
+	peerConnection        *webrtc.PeerConnection
+	congestionControlType congestionControlType
+	targetBitrate         int
 
 	pendingCandidates []*webrtc.ICECandidate
 	candidatesMux     sync.Mutex
@@ -25,6 +30,14 @@ type CaseVideoPion struct {
 	statInterval      time.Duration
 	testSource        testsource.FakeRTPDataWriter
 }
+
+type congestionControlType string
+
+const (
+	twccCongestionControl   congestionControlType = "twcc"
+	gccCongestionControl    congestionControlType = "gcc"
+	screamCongestionControl congestionControlType = "scream"
+)
 
 func (c *CaseVideoPion) Configure(config PeerCaseConfig, sendSignal func(signalType PeerSignalType, data []byte) error, statCollector stats.StatCollector) error {
 	c.sendSignal = sendSignal
@@ -46,6 +59,14 @@ func (c *CaseVideoPion) Configure(config PeerCaseConfig, sendSignal func(signalT
 	if err != nil {
 		return err
 	}
+	c.targetBitrate = bitrate
+
+	cct, ok := config.AdditionalConfig["congestion_control"]
+	if ok {
+		c.congestionControlType = congestionControlType(cct)
+	} else {
+		c.congestionControlType = twccCongestionControl
+	}
 
 	c.testSource = testsource.NewFakeRTPDataWriter(bitrate)
 	return nil
@@ -59,10 +80,49 @@ func (c *CaseVideoPion) Start() error {
 	}
 
 	icRegistry := interceptor.Registry{}
-	err = webrtc.RegisterDefaultInterceptors(&mediaEngine, &icRegistry)
+	err = webrtc.ConfigureNack(&mediaEngine, &icRegistry)
 	if err != nil {
 		return err
 	}
+	err = webrtc.ConfigureRTCPReports(&icRegistry)
+	if err != nil {
+		return err
+	}
+	err = webrtc.ConfigureCongestionControlFeedback(&mediaEngine, &icRegistry)
+	if err != nil {
+		return err
+	}
+
+	switch c.congestionControlType {
+	case twccCongestionControl:
+		err = webrtc.ConfigureTWCCSender(&mediaEngine, &icRegistry)
+		if err != nil {
+			return err
+		}
+	case gccCongestionControl:
+		ccFactory, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
+			return gcc.NewSendSideBWE(gcc.SendSideBWEMaxBitrate(c.targetBitrate))
+		})
+		if err != nil {
+			return err
+		}
+		icRegistry.Add(ccFactory)
+	case screamCongestionControl:
+		senderInterceptor, err := scream.NewSenderInterceptor(scream.MaxBitrate(float64(c.targetBitrate)))
+		if err != nil {
+			return err
+		}
+		receiverInterceptor, err := scream.NewReceiverInterceptor()
+		if err != nil {
+			return err
+		}
+
+		icRegistry.Add(senderInterceptor)
+		icRegistry.Add(receiverInterceptor)
+	default:
+		log.Fatal().Msgf("invalid congestion control type: %s", c.congestionControlType)
+	}
+
 	icRegistry.Add(c.statCollector.GetPionInterceptorFactory())
 
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(&mediaEngine), webrtc.WithInterceptorRegistry(&icRegistry))

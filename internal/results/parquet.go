@@ -4,6 +4,7 @@ import (
 	"github.com/parquet-go/parquet-go"
 	"github.com/rs/zerolog/log"
 	"os"
+	"sync"
 )
 
 type ParquetResultsWriter interface {
@@ -15,6 +16,7 @@ type ParquetResultsWriter interface {
 type parquetResultsWriter struct {
 	writeRow       chan ResultRow
 	resultFilePath string
+	writerFinished *sync.WaitGroup
 }
 
 func NewParquetResultsWriter() (ParquetResultsWriter, error) {
@@ -27,6 +29,9 @@ func NewParquetResultsWriter() (ParquetResultsWriter, error) {
 
 	writer := parquet.NewGenericWriter[ResultRow](file)
 	writeRowChan := make(chan ResultRow, 20)
+
+	writerFinished := sync.WaitGroup{}
+	writerFinished.Add(1)
 
 	go func() {
 		for row := range writeRowChan {
@@ -46,11 +51,13 @@ func NewParquetResultsWriter() (ParquetResultsWriter, error) {
 			log.Fatal().Err(err).Msg("Failed to close result file")
 			return
 		}
+		writerFinished.Done()
 	}()
 
 	return &parquetResultsWriter{
 		writeRow:       writeRowChan,
 		resultFilePath: file.Name(),
+		writerFinished: &writerFinished,
 	}, nil
 }
 
@@ -60,6 +67,7 @@ func (w *parquetResultsWriter) WriteRow(row ResultRow) {
 
 func (w *parquetResultsWriter) Close() {
 	close(w.writeRow)
+	w.writerFinished.Wait()
 }
 
 func (w *parquetResultsWriter) GetResultFile() (*os.File, error) {
