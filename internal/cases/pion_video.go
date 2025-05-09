@@ -6,6 +6,7 @@ import (
 	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v4"
 	"github.com/rs/zerolog/log"
+	"strconv"
 	"sync"
 	"time"
 	"webrtc-bench/internal/cases/stats"
@@ -36,7 +37,17 @@ func (c *CaseVideoPion) Configure(config PeerCaseConfig, sendSignal func(signalT
 	}
 	c.sendOffer = config.SendOffer
 	c.statCollector = statCollector
-	c.testSource = testsource.NewFakeRTPDataWriter(10000)
+
+	bitrateStr, ok := config.AdditionalConfig["bitrate"]
+	if !ok {
+		bitrateStr = "10000"
+	}
+	bitrate, err := strconv.Atoi(bitrateStr)
+	if err != nil {
+		return err
+	}
+
+	c.testSource = testsource.NewFakeRTPDataWriter(bitrate)
 	return nil
 }
 

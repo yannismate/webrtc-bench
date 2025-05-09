@@ -1,6 +1,7 @@
 const iceServers = ICE_SERVERS.map((iceUrl) => ({urls: iceUrl}));
 const doOffer = DO_OFFER;
 const statIntervalMs = STAT_INTERVAL_MS;
+const maxBitrate = BITRATE;
 
 function log(msg) {
     if (msg instanceof String) {
@@ -55,6 +56,12 @@ async function start() {
         log("Sending offer...");
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
+
+        // Set max. bitrate
+        const sender = peerConnection.getSenders()[0];
+        const senderParams = sender.getParameters();
+        senderParams.encodings.forEach(e => e.maxBitrate = maxBitrate);
+        await sender.setParameters(senderParams);
 
         sendManagementMessage(JSON.stringify({type: "sdp", value: JSON.stringify(offer)}))
     }

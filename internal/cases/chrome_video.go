@@ -45,6 +45,11 @@ func (c *CaseVideoChrome) Configure(config PeerCaseConfig, sendSignal func(signa
 		videoFilePath = path.Join("testdata", "test.y4m")
 	}
 
+	bitrateStr, ok := config.AdditionalConfig["bitrate"]
+	if !ok {
+		bitrateStr = "10000"
+	}
+
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("allow-file-access-from-files", "true"),
 		chromedp.Flag("disable-gesture-requirement-for-media-playback", "true"),
@@ -64,7 +69,8 @@ func (c *CaseVideoChrome) Configure(config PeerCaseConfig, sendSignal func(signa
 
 	setParamsJs := "const ICE_SERVERS = [\"" + strings.Join(config.ICEServers, "\", \"") + "\"];\n"
 	setParamsJs += "const DO_OFFER = " + strconv.FormatBool(config.SendOffer) + ";\n"
-	setParamsJs += "const STAT_INTERVAL_MS = " + strconv.FormatInt(time.Duration(config.StatInterval).Milliseconds(), 10) + ";"
+	setParamsJs += "const STAT_INTERVAL_MS = " + strconv.FormatInt(time.Duration(config.StatInterval).Milliseconds(), 10) + ";\n"
+	setParamsJs += "const BITRATE = " + bitrateStr + ";\n"
 
 	var res []string
 	err = chromedp.Run(c.browserContext,
