@@ -80,10 +80,6 @@ func (r *ReceiverInterceptor) BindRTCPWriter(writer interceptor.RTCPWriter) inte
 // BindRemoteStream lets you modify any incoming RTP packets. It is called once for per RemoteStream. The returned method
 // will be called once per rtp packet.
 func (r *ReceiverInterceptor) BindRemoteStream(info *interceptor.StreamInfo, reader interceptor.RTPReader) interceptor.RTPReader {
-	if !streamSupportSCReAM(info) {
-		return reader
-	}
-
 	rx := scream.NewRx(info.SSRC)
 	r.screamRxMu.Lock()
 	r.screamRx[info.SSRC] = rx

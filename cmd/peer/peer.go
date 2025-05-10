@@ -11,8 +11,15 @@ import (
 
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+
 	clientName := flag.String("name", "", "Client name")
+	verbose := flag.Bool("v", false, "enable verbose mode")
 	flag.Parse()
+
+	if *verbose {
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	}
 
 	if clientName == nil || *clientName == "" {
 		log.Fatal().Msg("You must specify a client name")

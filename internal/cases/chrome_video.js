@@ -76,7 +76,7 @@ async function start() {
                         packetsReceived: stats.packetsReceived,
                         packetsLost: stats.packetsLost,
                         jitter: stats.jitter,
-                        millisSinceLastPacket: Date.now() - Math.floor(stats.lastPacketReceivedTimestamp),
+                        millisSinceLastPacket: Math.max(0, Date.now() - Math.floor(stats.lastPacketReceivedTimestamp)),
                         bytesReceived: stats.bytesReceived,
                         headerBytesReceived: stats.headerBytesReceived,
                         firCount: stats.firCount,

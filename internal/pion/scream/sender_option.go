@@ -43,3 +43,10 @@ func MaxBitrate(rate float64) SenderOption {
 		return nil
 	}
 }
+
+func TotalBitrateChangeNotifier(channel chan int) SenderOption {
+	return func(s *SenderInterceptor) error {
+		s.totalBitrateChangeNotifier = channel
+		return nil
+	}
+}

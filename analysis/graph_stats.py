@@ -43,12 +43,12 @@ binned["Sent_Good_Bps"] = binned["GoodBytesSent"].diff() / window_sec
 binned = binned.iloc[1:]
 
 plt.figure(figsize=(10, 5))
-plt.plot(binned.index, binned["Sent_Bps"], label="Throughput Sent", color="orange", linestyle=":")
-plt.plot(binned.index, binned["Recv_Bps"], label="Throughput Received", color="green", linestyle=":")
-plt.plot(binned.index, binned["Sent_Good_Bps"], label="Goodput Sent", color="orange", linestyle="-")
-plt.plot(binned.index, binned["Recv_Good_Bps"], label="Goodput Received", color="green", linestyle="-")
+plt.plot(binned.index, binned["Sent_Bps"] * 8 / 1000, label="Throughput Sent", color="orange", linestyle=":")
+plt.plot(binned.index, binned["Recv_Bps"] * 8 / 1000, label="Throughput Received", color="green", linestyle=":")
+plt.plot(binned.index, binned["Sent_Good_Bps"] * 8 / 1000, label="Goodput Sent", color="orange", linestyle="-")
+plt.plot(binned.index, binned["Recv_Good_Bps"] * 8 / 1000, label="Goodput Received", color="green", linestyle="-")
 plt.xlabel(f"Time (aggregated every {window_sec}s)")
-plt.ylabel("Bytes/s")
+plt.ylabel("Kbit/s")
 plt.legend()
 plt.tight_layout()
 plt.show()

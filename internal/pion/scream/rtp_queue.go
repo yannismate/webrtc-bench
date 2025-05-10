@@ -30,7 +30,7 @@ func (q *queue) SeqNrOfLastRTP() uint16 {
 	if q.queue.Len() == 0 {
 		return 0
 	}
-	return q.queue.Back().Value.(*rtpQueueItem).packet.SequenceNumber
+	return q.queue.Back().Value.(rtpQueueItem).packet.SequenceNumber
 }
 
 func (q *queue) Clear() int {

@@ -54,7 +54,7 @@ func GetChromeTestMetadata() TestMetadata {
 
 	err := chromedp.Run(ctx, chromedp.Navigate("about:blank"))
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to start browser to get version")
+		log.Fatal().Err(err).Msg("Failed to start browser to get version")
 	}
 	chromeDpContext := chromedp.FromContext(ctx)
 	_, product, _, _, _, err := browser.GetVersion().Do(cdp.WithExecutor(ctx, chromeDpContext.Target))

@@ -17,6 +17,7 @@ type parquetResultsWriter struct {
 	writeRow       chan ResultRow
 	resultFilePath string
 	writerFinished *sync.WaitGroup
+	isClosed       bool
 }
 
 func NewParquetResultsWriter() (ParquetResultsWriter, error) {
@@ -62,10 +63,14 @@ func NewParquetResultsWriter() (ParquetResultsWriter, error) {
 }
 
 func (w *parquetResultsWriter) WriteRow(row ResultRow) {
+	if w.isClosed {
+		return
+	}
 	w.writeRow <- row
 }
 
 func (w *parquetResultsWriter) Close() {
+	w.isClosed = true
 	close(w.writeRow)
 	w.writerFinished.Wait()
 }

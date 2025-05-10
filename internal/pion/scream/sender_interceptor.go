@@ -94,9 +94,11 @@ type SenderInterceptor struct {
 	rtpStreams   map[uint32]*localStream
 	rtpStreamsMu sync.Mutex
 
-	minBitrate     float64
-	initialBitrate float64
-	maxBitrate     float64
+	minBitrate                    float64
+	initialBitrate                float64
+	maxBitrate                    float64
+	totalBitrateChangeNotifier    chan int
+	lastBitrateChangeNotification time.Time
 }
 
 func (s *SenderInterceptor) getTimeNTP(t time.Time) uint64 {
@@ -254,6 +256,10 @@ func (s *SenderInterceptor) Close() error {
 	if !s.isClosed() {
 		close(s.close)
 	}
+
+	if s.totalBitrateChangeNotifier != nil {
+		close(s.totalBitrateChangeNotifier)
+	}
 	return nil
 }
 
@@ -300,6 +306,11 @@ func (s *SenderInterceptor) loop(writer interceptor.RTPWriter, ssrc uint32) {
 			s.tx.AddTransmitted(s.getTimeNTP(time.Now()), ssrc, packet.MarshalSize(), packet.SequenceNumber, packet.Marker)
 			s.m.Unlock()
 		}
+
+		if s.totalBitrateChangeNotifier != nil && time.Now().Sub(s.lastBitrateChangeNotification) > time.Millisecond*100 {
+			s.lastBitrateChangeNotification = time.Now()
+			s.totalBitrateChangeNotifier <- s.GetTotalTargetBitrate()
+		}
 	}
 }
 
@@ -315,6 +326,24 @@ func (s *SenderInterceptor) GetTargetBitrate(ssrc uint32) (int, error) {
 	s.m.Lock()
 	defer s.m.Unlock()
 	return int(s.tx.GetTargetBitrate(ssrc)), nil
+}
+
+// GetTotalTargetBitrate returns the target bitrate calculated by SCReAM in bps.
+func (s *SenderInterceptor) GetTotalTargetBitrate() int {
+	// This is best-effort since we don't lock the list, but it should do
+	var ssrcList []uint32
+	for ssrc := range s.rtpStreams {
+		ssrcList = append(ssrcList, ssrc)
+	}
+
+	s.m.Lock()
+	defer s.m.Unlock()
+	totalBitrate := 0
+	for _, ssrc := range ssrcList {
+		s.tx.GetTargetBitrate(ssrc)
+		totalBitrate += int(s.tx.GetTargetBitrate(ssrc))
+	}
+	return totalBitrate
 }
 
 func (s *SenderInterceptor) GetStats() map[string]interface{} {

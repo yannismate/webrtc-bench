@@ -27,10 +27,16 @@ const (
 
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 
 	caseFilePath := flag.String("cases", "cases.json", "path to cases configuration")
 	resultsFolderPath := flag.String("results", "results", "path to results folder")
+	verbose := flag.Bool("v", false, "enable verbose mode")
 	flag.Parse()
+
+	if *verbose {
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	}
 
 	caseFile, err := os.Open(*caseFilePath)
 	if err != nil {

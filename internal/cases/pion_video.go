@@ -34,7 +34,7 @@ type CaseVideoPion struct {
 type congestionControlType string
 
 const (
-	twccCongestionControl   congestionControlType = "twcc"
+	noCongestionControl     congestionControlType = "none"
 	gccCongestionControl    congestionControlType = "gcc"
 	screamCongestionControl congestionControlType = "scream"
 )
@@ -65,7 +65,7 @@ func (c *CaseVideoPion) Configure(config PeerCaseConfig, sendSignal func(signalT
 	if ok {
 		c.congestionControlType = congestionControlType(cct)
 	} else {
-		c.congestionControlType = twccCongestionControl
+		c.congestionControlType = noCongestionControl
 	}
 
 	c.testSource = testsource.NewFakeRTPDataWriter(bitrate)
@@ -80,35 +80,45 @@ func (c *CaseVideoPion) Start() error {
 	}
 
 	icRegistry := interceptor.Registry{}
-	err = webrtc.ConfigureNack(&mediaEngine, &icRegistry)
-	if err != nil {
-		return err
-	}
-	err = webrtc.ConfigureRTCPReports(&icRegistry)
-	if err != nil {
-		return err
-	}
-	err = webrtc.ConfigureCongestionControlFeedback(&mediaEngine, &icRegistry)
-	if err != nil {
-		return err
-	}
+	err = webrtc.RegisterDefaultInterceptors(&mediaEngine, &icRegistry)
 
 	switch c.congestionControlType {
-	case twccCongestionControl:
-		err = webrtc.ConfigureTWCCSender(&mediaEngine, &icRegistry)
-		if err != nil {
-			return err
-		}
+	case noCongestionControl:
+		log.Warn().Msg("Congestion control is set to none")
 	case gccCongestionControl:
 		ccFactory, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
-			return gcc.NewSendSideBWE(gcc.SendSideBWEMaxBitrate(c.targetBitrate))
+			bwe, err := gcc.NewSendSideBWE(gcc.SendSideBWEMinBitrate(c.targetBitrate/2),
+				gcc.SendSideBWEInitialBitrate(c.targetBitrate/2),
+				gcc.SendSideBWEMaxBitrate(c.targetBitrate))
+			if err != nil {
+				return nil, err
+			}
+			bwe.OnTargetBitrateChange(c.testSource.SetBitrate)
+			return bwe, err
 		})
 		if err != nil {
 			return err
 		}
 		icRegistry.Add(ccFactory)
+
+		err = webrtc.ConfigureTWCCHeaderExtensionSender(&mediaEngine, &icRegistry)
+		if err != nil {
+			return err
+		}
 	case screamCongestionControl:
-		senderInterceptor, err := scream.NewSenderInterceptor(scream.MaxBitrate(float64(c.targetBitrate)))
+		var bitrateUpdateNotifier = make(chan int)
+		senderInterceptor, err := scream.NewSenderInterceptor(
+			scream.MaxBitrate(float64(c.targetBitrate)),
+			scream.MinBitrate(float64(c.targetBitrate/2)),
+			scream.InitialBitrate(float64(c.targetBitrate/2)),
+			scream.TotalBitrateChangeNotifier(bitrateUpdateNotifier))
+
+		go func() {
+			for br := range bitrateUpdateNotifier {
+				c.testSource.SetBitrate(br)
+			}
+		}()
+
 		if err != nil {
 			return err
 		}
@@ -273,6 +283,9 @@ func (c *CaseVideoPion) OnReceiveSignal(signalType PeerSignalType, message []byt
 		}
 		return nil
 	} else if signalType == PeerSignalTypeCandidates {
+		if c.peerConnection.RemoteDescription() == nil {
+			return nil
+		}
 		candidate := webrtc.ICECandidateInit{}
 		err := json.Unmarshal(message, &candidate)
 		if err != nil {
