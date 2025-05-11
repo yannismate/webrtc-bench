@@ -43,8 +43,9 @@ func (c *CaseVideoChrome) Configure(config PeerCaseConfig, sendSignal func(signa
 
 	videoFilePath, ok := config.AdditionalConfig["video_file"]
 	if !ok {
-		videoFilePath = path.Join("testdata", "test.y4m")
+		videoFilePath = path.Join(cwd, "testdata", "test.y4m")
 	}
+	log.Debug().Msgf("Using video source from %s", videoFilePath)
 
 	bitrateStr, ok := config.AdditionalConfig["bitrate"]
 	if !ok {
@@ -57,10 +58,10 @@ func (c *CaseVideoChrome) Configure(config PeerCaseConfig, sendSignal func(signa
 	}
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.Flag("allow-file-access-from-files", "true"),
-		chromedp.Flag("disable-gesture-requirement-for-media-playback", "true"),
-		chromedp.Flag("use-fake-ui-for-media-stream", "true"),
-		chromedp.Flag("use-fake-device-for-media-stream", "true"),
+		chromedp.Flag("allow-file-access-from-files", true),
+		chromedp.Flag("disable-gesture-requirement-for-media-playback", true),
+		chromedp.Flag("use-fake-ui-for-media-stream", true),
+		chromedp.Flag("use-fake-device-for-media-stream", true),
 		chromedp.Flag("use-file-for-fake-video-capture", path.Join(cwd, videoFilePath)),
 	)
 
@@ -78,9 +79,11 @@ func (c *CaseVideoChrome) Configure(config PeerCaseConfig, sendSignal func(signa
 	setParamsJs += "const STAT_INTERVAL_MS = " + strconv.FormatInt(time.Duration(config.StatInterval).Milliseconds(), 10) + ";\n"
 	setParamsJs += "const BITRATE = " + bitrateStr + ";\n"
 
+	emptyPagePath := path.Join(cwd, "testdata", "empty_page.html")
+	log.Debug().Msgf("Loading empty page from %s", emptyPagePath)
 	var res []string
 	err = chromedp.Run(c.browserContext,
-		chromedp.Navigate("file://"+path.Join(cwd, "testdata", "empty_page.html")),
+		chromedp.Navigate("file://"+emptyPagePath),
 		util.ExposeFunc("sendManagementMessage", c.browserMessage),
 		chromedp.EvaluateAsDevTools(setParamsJs, &res),
 		chromedp.EvaluateAsDevTools(caseVideoJs, &res))
