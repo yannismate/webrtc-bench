@@ -31,11 +31,19 @@ func main() {
 
 	caseFilePath := flag.String("cases", "cases.json", "path to cases configuration")
 	resultsFolderPath := flag.String("results", "results", "path to results folder")
+	authenticationKey := flag.String("key", "", "authentication key")
+	bindAddress := flag.String("bind", "127.0.0.1:8080", "Bind to address")
 	verbose := flag.Bool("v", false, "enable verbose mode")
 	flag.Parse()
 
 	if *verbose {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	}
+
+	if authenticationKey == nil || *authenticationKey == "" {
+		authKey := "default-auth-key"
+		authenticationKey = &authKey
+		log.Warn().Msg("Authentication key set to default!")
 	}
 
 	caseFile, err := os.Open(*caseFilePath)
@@ -58,7 +66,7 @@ func main() {
 		return
 	}
 
-	server := management.NewServer("127.0.0.1:8080", "someAuthenticationKey")
+	server := management.NewServer(*bindAddress, *authenticationKey)
 	server.Start()
 
 	connectedClients := make(map[string]management.ClientState)

@@ -10,7 +10,7 @@ import (
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
 
-	caseInstance := cases.CaseConnectChrome{}
+	caseInstance := cases.CaseVideoChrome{}
 	err := caseInstance.Configure(cases.PeerCaseConfig{
 		Implementation:   "chrome",
 		ICEServers:       []string{"stun:stun.l.google.com:19302"},

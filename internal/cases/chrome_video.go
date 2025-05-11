@@ -6,9 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/chromedp/cdproto/runtime"
-	"github.com/chromedp/chromedp"
-	"github.com/rs/zerolog/log"
 	"os"
 	"path"
 	"strconv"
@@ -18,6 +15,10 @@ import (
 	"webrtc-bench/internal/cases/stats"
 	"webrtc-bench/internal/results"
 	"webrtc-bench/internal/util"
+
+	"github.com/chromedp/cdproto/runtime"
+	"github.com/chromedp/chromedp"
+	"github.com/rs/zerolog/log"
 )
 
 type CaseVideoChrome struct {
@@ -62,7 +63,7 @@ func (c *CaseVideoChrome) Configure(config PeerCaseConfig, sendSignal func(signa
 		chromedp.Flag("disable-gesture-requirement-for-media-playback", true),
 		chromedp.Flag("use-fake-ui-for-media-stream", true),
 		chromedp.Flag("use-fake-device-for-media-stream", true),
-		chromedp.Flag("use-file-for-fake-video-capture", path.Join(cwd, videoFilePath)),
+		chromedp.Flag("use-file-for-fake-video-capture", videoFilePath),
 	)
 
 	parentCtx, parentCtxCancel := chromedp.NewExecAllocator(context.Background(), opts...)
