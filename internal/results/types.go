@@ -24,7 +24,7 @@ type ResultRowInboundRTP struct {
 	FramesDropped                *uint64
 	KeyFramesDecoded             *uint32
 	FreezeCount                  *uint32
-	TotalFreezesDuration         *uint32
+	TotalFreezesDuration         *float32
 	RetransmittedBytesReceived   *uint64
 	RetransmittedPacketsReceived *uint64
 }
