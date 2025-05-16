@@ -80,6 +80,12 @@ func (c *CaseVideoPion) Start() error {
 	}
 
 	icRegistry := interceptor.Registry{}
+
+	// Stat interceptor should record packets before any other interceptors modify them on the receiving end
+	if !c.sendOffer {
+		icRegistry.Add(c.statCollector.GetPionInterceptorFactory())
+	}
+
 	err = webrtc.RegisterDefaultInterceptors(&mediaEngine, &icRegistry)
 
 	switch c.congestionControlType {
@@ -87,13 +93,14 @@ func (c *CaseVideoPion) Start() error {
 		log.Warn().Msg("Congestion control is set to none")
 	case gccCongestionControl:
 		ccFactory, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
-			bwe, err := gcc.NewSendSideBWE(gcc.SendSideBWEMinBitrate(c.targetBitrate/2),
-				gcc.SendSideBWEInitialBitrate(c.targetBitrate/2),
-				gcc.SendSideBWEMaxBitrate(c.targetBitrate))
+			bwe, err := gcc.NewSendSideBWE(gcc.SendSideBWEInitialBitrate(c.targetBitrate/2),
+				gcc.SendSideBWEMaxBitrate(c.targetBitrate*2))
 			if err != nil {
 				return nil, err
 			}
-			bwe.OnTargetBitrateChange(c.testSource.SetBitrate)
+			bwe.OnTargetBitrateChange(func(bitrate int) {
+				c.testSource.SetBitrate(min(bitrate, c.targetBitrate))
+			})
 			return bwe, err
 		})
 		if err != nil {
@@ -108,14 +115,13 @@ func (c *CaseVideoPion) Start() error {
 	case screamCongestionControl:
 		var bitrateUpdateNotifier = make(chan int)
 		senderInterceptor, err := scream.NewSenderInterceptor(
-			scream.MaxBitrate(float64(c.targetBitrate)),
-			scream.MinBitrate(float64(c.targetBitrate/2)),
+			scream.MaxBitrate(float64(2*c.targetBitrate)),
 			scream.InitialBitrate(float64(c.targetBitrate/2)),
 			scream.TotalBitrateChangeNotifier(bitrateUpdateNotifier))
 
 		go func() {
 			for br := range bitrateUpdateNotifier {
-				c.testSource.SetBitrate(br)
+				c.testSource.SetBitrate(min(br, c.targetBitrate))
 			}
 		}()
 
@@ -133,7 +139,9 @@ func (c *CaseVideoPion) Start() error {
 		log.Fatal().Msgf("invalid congestion control type: %s", c.congestionControlType)
 	}
 
-	icRegistry.Add(c.statCollector.GetPionInterceptorFactory())
+	if c.sendOffer {
+		icRegistry.Add(c.statCollector.GetPionInterceptorFactory())
+	}
 
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(&mediaEngine), webrtc.WithInterceptorRegistry(&icRegistry))
 	peerConnection, err := api.NewPeerConnection(c.webrtcCfg)

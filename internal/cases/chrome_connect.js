@@ -64,6 +64,10 @@ async function receiveManagementMessage(type, msgString) {
             log("Set remote description, RTC should be ready.");
         }
     } else if (type === "candidates") {
+        if (peerConnection.currentRemoteDescription == null) {
+            log("Ignored ICE candidates since remote description is still null");
+            return;
+        }
         await peerConnection.addIceCandidate(new RTCIceCandidate(JSON.parse(msgString)));
     }
 }
