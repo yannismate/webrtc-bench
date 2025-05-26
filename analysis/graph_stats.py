@@ -39,6 +39,11 @@ df = table.to_pandas().rename(
     }
 )
 
+if "PacketsReceived" not in df or df["PacketsReceived"].isna().all() or (df["PacketsReceived"] == 0).all():
+    graph_packet_loss = False
+else:
+    graph_packet_loss = True
+
 df.set_index("Timestamp", inplace=True)
 period = f"{int(window_sec * 1000)}ms"
 binned = df.resample(period).last()
@@ -56,7 +61,6 @@ binned["Sent_Good_Bps"] = binned["GoodBytesSent"].diff() / window_sec
 binned = binned.iloc[1:]
 
 fig, ax1 = plt.subplots()
-ax2 = ax1.twinx()
 
 ax1.plot(binned.index, binned["Sent_Bps"] * 8 / 1000, label="Throughput Sent", color="orange", linestyle=":")
 ax1.plot(binned.index, binned["Recv_Bps"] * 8 / 1000, label="Throughput Received", color="green", linestyle=":")
@@ -65,8 +69,10 @@ ax1.plot(binned.index, binned["Recv_Good_Bps"] * 8 / 1000, label="Goodput Receiv
 ax1.set_xlabel(f"Time (aggregated every {window_sec}s)")
 ax1.set_ylabel("Kbit/s")
 
-ax2.plot(binned.index, binned["PacketLossRate"] * 100, label="Packet Loss", color="red", linestyle="-")
-ax2.set_ylabel("%")
+if graph_packet_loss:
+    ax2 = ax1.twinx()
+    ax2.plot(binned.index, binned["PacketLossRate"] * 100, label="Packet Loss", color="red", linestyle="-")
+    ax2.set_ylabel("%")
 
 plt.legend()
 plt.tight_layout()
@@ -76,4 +82,3 @@ if save_graph:
     plt.savefig(output_path)
 else:
     plt.show()
-
