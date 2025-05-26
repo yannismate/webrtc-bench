@@ -72,24 +72,25 @@ async function start() {
             allStats.forEach(stats => {
                 if (stats.type === "inbound-rtp") {
                     statData.timestamp = new Date(Math.round(stats.timestamp)).toISOString();
-                    statData.inboundRtp = {
-                        packetsReceived: stats.packetsReceived,
-                        packetsLost: stats.packetsLost,
-                        jitter: stats.jitter,
-                        millisSinceLastPacket: Math.max(0, Date.now() - Math.floor(stats.lastPacketReceivedTimestamp)),
-                        bytesReceived: stats.bytesReceived,
-                        headerBytesReceived: stats.headerBytesReceived,
-                        firCount: stats.firCount,
-                        pliCount: stats.pliCount,
-                        nackCount: stats.nackCount,
-                        framesReceived: stats.framesReceived,
-                        framesDropped: stats.framesDropped,
-                        keyFramesDecoded: stats.keyFramesDecoded,
-                        freezeCount: stats.freezeCount,
-                        totalFreezesDuration: stats.totalFreezesDuration,
-                        retransmittedBytesReceived: stats.retransmittedBytesReceived,
-                        retransmittedPacketsReceived: stats.retransmittedPacketsReceived
-                    };
+                    if (!statData.inboundRtp) {
+                        statData.inboundRtp = {};
+                    }
+                    statData.inboundRtp.packetsReceived = stats.packetsReceived;
+                    statData.inboundRtp.packetsLost = stats.packetsLost;
+                    statData.inboundRtp.jitter = stats.jitter;
+                    statData.inboundRtp.millisSinceLastPacket = Math.max(0, Date.now() - Math.floor(stats.lastPacketReceivedTimestamp));
+                    statData.inboundRtp.bytesReceived = stats.bytesReceived;
+                    statData.inboundRtp.headerBytesReceived = stats.headerBytesReceived;
+                    statData.inboundRtp.firCount = stats.firCount;
+                    statData.inboundRtp.pliCount = stats.pliCount;
+                    statData.inboundRtp.nackCount = stats.nackCount;
+                    statData.inboundRtp.framesReceived = stats.framesReceived;
+                    statData.inboundRtp.framesDropped = stats.framesDropped;
+                    statData.inboundRtp.keyFramesDecoded = stats.keyFramesDecoded;
+                    statData.inboundRtp.freezeCount = stats.freezeCount;
+                    statData.inboundRtp.totalFreezesDuration = stats.totalFreezesDuration;
+                    statData.inboundRtp.retransmittedBytesReceived = stats.retransmittedBytesReceived;
+                    statData.inboundRtp.retransmittedPacketsReceived = stats.retransmittedPacketsReceived;
                 } else if (stats.type === "outbound-rtp") {
                     statData.timestamp = new Date(Math.round(stats.timestamp)).toISOString();
                     statData.outboundRtp = {
@@ -102,6 +103,16 @@ async function start() {
                         framesSent: stats.framesSent,
                         targetBitrate: stats.targetBitrate
                     };
+                } else if (stats.type === "remote-inbound-rtp") {
+                    if (!statData.outboundRtp) {
+                        statData.outboundRtp = {};
+                    }
+                    statData.outboundRtp.roundTripTime = stats.roundTripTime;
+                } else if (stats.type === "remote-outbound-rtp") {
+                    if (!statData.inboundRtp) {
+                        statData.inboundRtp = {};
+                    }
+                    statData.inboundRtp.roundTripTime = stats.roundTripTime;
                 }
             });
             sendManagementMessage(JSON.stringify({type: "stats", value: JSON.stringify(statData)}))
