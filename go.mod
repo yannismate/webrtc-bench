@@ -16,7 +16,7 @@ require (
 	github.com/pion/logging v0.2.3
 	github.com/pion/rtcp v1.2.15
 	github.com/pion/rtp v1.8.15
-	github.com/pion/webrtc/v4 v4.1.0
+	github.com/pion/webrtc/v4 v4.1.1
 	github.com/rs/zerolog v1.34.0
 )
 
@@ -46,7 +46,7 @@ require (
 	github.com/pion/turn/v4 v4.0.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
-	golang.org/x/crypto v0.33.0 // indirect
-	golang.org/x/net v0.35.0 // indirect
+	golang.org/x/crypto v0.36.0 // indirect
+	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/sys v0.32.0 // indirect
 )
