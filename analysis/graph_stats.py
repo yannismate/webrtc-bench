@@ -3,9 +3,17 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 import matplotlib.pyplot as plt
+import argparse
 
-parquet_file_path = sys.argv[1]
-window_sec = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
+parser = argparse.ArgumentParser(description="Analyze and graph WebRTC stats from a Parquet file.")
+parser.add_argument("file", help="Path to the input Parquet file")
+parser.add_argument("--aggr-window", type=float, default=1.0, help="Aggregation window in seconds")
+parser.add_argument("--save", action="store_true", help="Save the graph as a PNG file instead of displaying it")
+args = parser.parse_args()
+
+parquet_file_path = args.file
+window_sec = args.aggr_window
+save_graph = args.save
 
 table = pq.read_pandas(
     parquet_file_path,
@@ -62,4 +70,10 @@ ax2.set_ylabel("%")
 
 plt.legend()
 plt.tight_layout()
-plt.show()
+
+if save_graph:
+    output_path = parquet_file_path.replace(".parquet", ".png")
+    plt.savefig(output_path)
+else:
+    plt.show()
+
