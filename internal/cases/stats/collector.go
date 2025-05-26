@@ -78,6 +78,7 @@ func (sc *statCollector) StartCollection(streamID uint32) {
 					InboundRTP: results.ResultRowInboundRTP{
 						PacketsReceived:       recordedStats.InboundRTPStreamStats.PacketsReceived,
 						PacketsLost:           recordedStats.InboundRTPStreamStats.PacketsLost,
+						RoundTripTime:         recordedStats.RemoteOutboundRTPStreamStats.RoundTripTime.Milliseconds(),
 						Jitter:                recordedStats.InboundRTPStreamStats.Jitter,
 						MillisSinceLastPacket: uint64(now.Sub(recordedStats.InboundRTPStreamStats.LastPacketReceivedTimestamp).Milliseconds()),
 						HeaderBytesReceived:   recordedStats.InboundRTPStreamStats.HeaderBytesReceived,
@@ -88,6 +89,7 @@ func (sc *statCollector) StartCollection(streamID uint32) {
 					},
 					OutboundRTP: results.ResultRowOutboundRTP{
 						PacketsSent:     recordedStats.OutboundRTPStreamStats.PacketsSent,
+						RoundTripTime:   recordedStats.RemoteInboundRTPStreamStats.RoundTripTime.Milliseconds(),
 						BytesSent:       recordedStats.OutboundRTPStreamStats.BytesSent,
 						HeaderBytesSent: recordedStats.OutboundRTPStreamStats.HeaderBytesSent,
 						NACKCount:       recordedStats.OutboundRTPStreamStats.NACKCount,
