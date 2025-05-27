@@ -1,11 +1,13 @@
 package stats
 
 import (
-	"github.com/pion/interceptor/pkg/stats"
-	"github.com/rs/zerolog/log"
 	"sync"
 	"time"
 	"webrtc-bench/internal/results"
+
+	"github.com/pion/interceptor/pkg/gcc"
+	"github.com/pion/interceptor/pkg/stats"
+	"github.com/rs/zerolog/log"
 )
 
 type StatCollector interface {
@@ -14,12 +16,15 @@ type StatCollector interface {
 	StartCollection(streamID uint32)
 	StopCollection()
 	RecordRow(row results.ResultRow)
+	AddGCCEstimatorCollection(bwe *gcc.SendSideBWE)
 }
 
 type statCollector struct {
 	statsGetter             stats.Getter
 	statsInterceptorFactory *stats.InterceptorFactory
 	collectionInterval      time.Duration
+
+	gccBwe *gcc.SendSideBWE
 
 	usingStopChannel   bool
 	stopCollection     chan bool
@@ -61,6 +66,10 @@ func (sc *statCollector) RecordRow(row results.ResultRow) {
 	sc.resultWriter.WriteRow(row)
 }
 
+func (sc *statCollector) AddGCCEstimatorCollection(bwe *gcc.SendSideBWE) {
+	sc.gccBwe = bwe
+}
+
 func (sc *statCollector) StartCollection(streamID uint32) {
 	go func() {
 		sc.usingStopChannel = true
@@ -72,6 +81,21 @@ func (sc *statCollector) StartCollection(streamID uint32) {
 				return
 			case <-ticker.C:
 				recordedStats := sc.statsGetter.Get(streamID)
+				var gccStats *results.GCCStats
+
+				if sc.gccBwe != nil {
+					gccStatMap := sc.gccBwe.GetStats()
+					gccStats = &results.GCCStats{
+						LossTargetBitrate:  uint32(gccStatMap["lossTargetBitrate"].(int)),
+						AverageLoss:        gccStatMap["averageLoss"].(float64),
+						DelayTargetBitrate: uint32(gccStatMap["delayTargetBitrate"].(int)),
+						DelayMeasurement:   gccStatMap["delayMeasurement"].(float64),
+						DelayEstimate:      gccStatMap["delayEstimate"].(float64),
+						DelayThreashold:    gccStatMap["delayThreashold"].(float64),
+						Usage:              gccStatMap["usage"].(string),
+						State:              gccStatMap["state"].(string),
+					}
+				}
 				now := time.Now()
 				sc.resultWriter.WriteRow(results.ResultRow{
 					Timestamp: now,
@@ -96,6 +120,7 @@ func (sc *statCollector) StartCollection(streamID uint32) {
 						FIRCount:        recordedStats.OutboundRTPStreamStats.FIRCount,
 						PLICount:        recordedStats.OutboundRTPStreamStats.PLICount,
 					},
+					GCCStats: gccStats,
 				})
 			}
 		}

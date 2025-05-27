@@ -8,6 +8,7 @@ type ResultRow struct {
 	Timestamp   time.Time
 	InboundRTP  ResultRowInboundRTP
 	OutboundRTP ResultRowOutboundRTP
+	GCCStats    *GCCStats
 }
 
 type ResultRowInboundRTP struct {
@@ -40,4 +41,15 @@ type ResultRowOutboundRTP struct {
 	PLICount        uint32
 	FramesSent      *uint64
 	TargetBitrate   *uint32
+}
+
+type GCCStats struct {
+	LossTargetBitrate  uint32
+	AverageLoss        float64
+	DelayTargetBitrate uint32
+	DelayMeasurement   float64
+	DelayEstimate      float64
+	DelayThreashold    float64
+	Usage              string
+	State              string
 }

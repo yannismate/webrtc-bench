@@ -3,17 +3,18 @@ package cases
 import (
 	"encoding/json"
 	"errors"
-	"github.com/pion/interceptor"
-	"github.com/pion/interceptor/pkg/cc"
-	"github.com/pion/interceptor/pkg/gcc"
-	"github.com/pion/webrtc/v4"
-	"github.com/rs/zerolog/log"
 	"strconv"
 	"sync"
 	"time"
 	"webrtc-bench/internal/cases/stats"
 	"webrtc-bench/internal/cases/testsource"
 	"webrtc-bench/internal/pion/scream"
+
+	"github.com/pion/interceptor"
+	"github.com/pion/interceptor/pkg/cc"
+	"github.com/pion/interceptor/pkg/gcc"
+	"github.com/pion/webrtc/v4"
+	"github.com/rs/zerolog/log"
 )
 
 type CaseVideoPion struct {
@@ -92,17 +93,16 @@ func (c *CaseVideoPion) Start() error {
 	case noCongestionControl:
 		log.Warn().Msg("Congestion control is set to none")
 	case gccCongestionControl:
-		ccFactory, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
-			bwe, err := gcc.NewSendSideBWE(gcc.SendSideBWEInitialBitrate(c.targetBitrate/2),
-				gcc.SendSideBWEMaxBitrate(c.targetBitrate*2))
-			if err != nil {
-				return nil, err
-			}
-			bwe.OnTargetBitrateChange(func(bitrate int) {
-				c.testSource.SetBitrate(min(bitrate, c.targetBitrate))
-			})
-			return bwe, err
+		bwe, err := gcc.NewSendSideBWE(gcc.SendSideBWEInitialBitrate(c.targetBitrate/2),
+			gcc.SendSideBWEMaxBitrate(c.targetBitrate*2))
+		if err != nil {
+			return err
+		}
+		bwe.OnTargetBitrateChange(func(bitrate int) {
+			c.testSource.SetBitrate(min(bitrate, c.targetBitrate))
 		})
+
+		ccFactory, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) { return bwe, err })
 		if err != nil {
 			return err
 		}
