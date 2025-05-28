@@ -62,7 +62,7 @@ func (fw *fakeRTPDataWriter) Start() uint32 {
 	go func() {
 		for {
 			if _, _, err := fw.rtpSender.ReadRTCP(); err != nil {
-				if errors.Is(io.EOF, err) {
+				if err == io.EOF {
 					log.Debug().Err(err).Msg("Fake rtpSender stopped")
 					return
 				}
@@ -77,7 +77,8 @@ func (fw *fakeRTPDataWriter) Start() uint32 {
 }
 
 func (fw *fakeRTPDataWriter) SetBitrate(targetBitrate int) {
-	fw.codec.SetTargetBitrate(targetBitrate)
+	// Target bitrate should always be at least 30kbps, as this is the minimum bitrate WebRTC video
+	fw.codec.SetTargetBitrate(min(targetBitrate, 30_000))
 }
 
 func (fw *fakeRTPDataWriter) Stop() {

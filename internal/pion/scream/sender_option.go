@@ -50,3 +50,10 @@ func TotalBitrateChangeNotifier(channel chan int) SenderOption {
 		return nil
 	}
 }
+
+func OnSenderInterceptorCreated(fn func(*SenderInterceptor)) SenderOption {
+	return func(s *SenderInterceptor) error {
+		fn(s)
+		return nil
+	}
+}

@@ -9,6 +9,7 @@ type ResultRow struct {
 	InboundRTP  ResultRowInboundRTP
 	OutboundRTP ResultRowOutboundRTP
 	GCCStats    *GCCStats
+	ScreamStats *ScreamStats
 }
 
 type ResultRowInboundRTP struct {
@@ -52,4 +53,7 @@ type GCCStats struct {
 	DelayThreashold    float64
 	Usage              string
 	State              string
+}
+
+type ScreamStats struct {
 }

@@ -3,6 +3,7 @@ package stats
 import (
 	"sync"
 	"time"
+	"webrtc-bench/internal/pion/scream"
 	"webrtc-bench/internal/results"
 
 	"github.com/pion/interceptor/pkg/gcc"
@@ -17,6 +18,7 @@ type StatCollector interface {
 	StopCollection()
 	RecordRow(row results.ResultRow)
 	AddGCCEstimatorCollection(bwe *gcc.SendSideBWE)
+	AddScreamSenderCollection(bwe *scream.SenderInterceptor)
 }
 
 type statCollector struct {
@@ -24,7 +26,8 @@ type statCollector struct {
 	statsInterceptorFactory *stats.InterceptorFactory
 	collectionInterval      time.Duration
 
-	gccBwe *gcc.SendSideBWE
+	gccBwe   *gcc.SendSideBWE
+	screamSi *scream.SenderInterceptor
 
 	usingStopChannel   bool
 	stopCollection     chan bool
@@ -70,6 +73,10 @@ func (sc *statCollector) AddGCCEstimatorCollection(bwe *gcc.SendSideBWE) {
 	sc.gccBwe = bwe
 }
 
+func (sc *statCollector) AddScreamSenderCollection(screamSi *scream.SenderInterceptor) {
+	sc.screamSi = screamSi
+}
+
 func (sc *statCollector) StartCollection(streamID uint32) {
 	go func() {
 		sc.usingStopChannel = true
@@ -82,6 +89,7 @@ func (sc *statCollector) StartCollection(streamID uint32) {
 			case <-ticker.C:
 				recordedStats := sc.statsGetter.Get(streamID)
 				var gccStats *results.GCCStats
+				var screamStats *results.ScreamStats
 
 				if sc.gccBwe != nil {
 					gccStatMap := sc.gccBwe.GetStats()
@@ -96,6 +104,12 @@ func (sc *statCollector) StartCollection(streamID uint32) {
 						State:              gccStatMap["state"].(string),
 					}
 				}
+
+				if sc.screamSi != nil {
+					screamStatMap := sc.screamSi.GetStats()
+					log.Info().Msgf("Scream stats: %v", screamStatMap)
+				}
+
 				now := time.Now()
 				sc.resultWriter.WriteRow(results.ResultRow{
 					Timestamp: now,
@@ -121,6 +135,7 @@ func (sc *statCollector) StartCollection(streamID uint32) {
 						PLICount:        recordedStats.OutboundRTPStreamStats.PLICount,
 					},
 					GCCStats: gccStats,
+					ScreamStats: screamStats,
 				})
 			}
 		}

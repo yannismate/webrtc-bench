@@ -6,19 +6,7 @@ package scream
 
 import (
 	"time"
-
-	"github.com/pion/interceptor"
 )
-
-func streamSupportSCReAM(info *interceptor.StreamInfo) bool {
-	for _, fb := range info.RTCPFeedback {
-		if fb.Type == "ack" && fb.Parameter == "ccfb" {
-			return true
-		}
-	}
-
-	return false
-}
 
 func ntpTime32(t time.Time) uint32 {
 	// seconds since 1st January 1900

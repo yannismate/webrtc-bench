@@ -101,6 +101,7 @@ func (c *CaseVideoPion) Start() error {
 		bwe.OnTargetBitrateChange(func(bitrate int) {
 			c.testSource.SetBitrate(min(bitrate, c.targetBitrate))
 		})
+		c.statCollector.AddGCCEstimatorCollection(bwe)
 
 		ccFactory, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) { return bwe, err })
 		if err != nil {
@@ -117,7 +118,8 @@ func (c *CaseVideoPion) Start() error {
 		senderInterceptor, err := scream.NewSenderInterceptor(
 			scream.MaxBitrate(float64(2*c.targetBitrate)),
 			scream.InitialBitrate(float64(c.targetBitrate/2)),
-			scream.TotalBitrateChangeNotifier(bitrateUpdateNotifier))
+			scream.TotalBitrateChangeNotifier(bitrateUpdateNotifier),
+			scream.OnSenderInterceptorCreated(c.statCollector.AddScreamSenderCollection))
 
 		go func() {
 			for br := range bitrateUpdateNotifier {
