@@ -1,16 +1,15 @@
 package stats
 
 import (
+	"github.com/pion/interceptor/pkg/gcc"
+	"github.com/pion/interceptor/pkg/stats"
+	"github.com/rs/zerolog/log"
 	"strconv"
 	"sync"
 	"time"
 	"webrtc-bench/internal/pion/scream"
 	"webrtc-bench/internal/results"
 	"webrtc-bench/internal/util"
-
-	"github.com/pion/interceptor/pkg/gcc"
-	"github.com/pion/interceptor/pkg/stats"
-	"github.com/rs/zerolog/log"
 )
 
 type StatCollector interface {
@@ -101,7 +100,7 @@ func (sc *statCollector) StartCollection(streamID uint32) {
 						DelayTargetBitrate: uint32(gccStatMap["delayTargetBitrate"].(int)),
 						DelayMeasurement:   gccStatMap["delayMeasurement"].(float64),
 						DelayEstimate:      gccStatMap["delayEstimate"].(float64),
-						DelayThreashold:    gccStatMap["delayThreashold"].(float64),
+						DelayThreashold:    gccStatMap["delayThreshold"].(float64),
 						Usage:              gccStatMap["usage"].(string),
 						State:              gccStatMap["state"].(string),
 					}
@@ -110,14 +109,18 @@ func (sc *statCollector) StartCollection(streamID uint32) {
 				if sc.screamSi != nil {
 					screamStatMap := sc.screamSi.GetStats()
 
-					screamStats = &results.ScreamStats{
-						QueueDelay:       util.AssumeNoErr(strconv.ParseFloat(screamStatMap["queueDelay"].(string), 64)),
-						QueueDelayMax:    util.AssumeNoErr(strconv.ParseFloat(screamStatMap["queueDelayMax"].(string), 64)),
-						QueueDelayMinAvg: util.AssumeNoErr(strconv.ParseFloat(screamStatMap["queueDelayMinAvg"].(string), 64)),
-						CWND:             uint32(util.AssumeNoErr(strconv.ParseUint(screamStatMap["cwnd"].(string), 10, 32))),
-						BytesInFlightLog: uint32(util.AssumeNoErr(strconv.ParseUint(screamStatMap["bytesInFlightLog"].(string), 10, 32))),
-						IsInFastStart:    screamStatMap["isInFastStart"].(string) == "1",
-						TargetBitrate:    uint32(util.AssumeNoErr(strconv.ParseUint(screamStatMap["targetBitrate"].(string), 10, 32))),
+					if _, ok := screamStatMap["targetBitrate"]; ok {
+						if _, castOk := screamStatMap["targetBitrate"].(string); castOk {
+							screamStats = &results.ScreamStats{
+								QueueDelay:       util.AssumeNoErr(strconv.ParseFloat(screamStatMap["queueDelay"].(string), 64)),
+								QueueDelayMax:    util.AssumeNoErr(strconv.ParseFloat(screamStatMap["queueDelayMax"].(string), 64)),
+								QueueDelayMinAvg: util.AssumeNoErr(strconv.ParseFloat(screamStatMap["queueDelayMinAvg"].(string), 64)),
+								CWND:             uint32(util.AssumeNoErr(strconv.ParseUint(screamStatMap["cwnd"].(string), 10, 32))),
+								BytesInFlightLog: uint32(util.AssumeNoErr(strconv.ParseUint(screamStatMap["bytesInFlightLog"].(string), 10, 32))),
+								IsInFastStart:    screamStatMap["isInFastStart"].(string) == "1",
+								TargetBitrate:    uint32(util.AssumeNoErr(strconv.ParseUint(screamStatMap["targetBitrate"].(string), 10, 32))),
+							}
+						}
 					}
 				}
 
@@ -127,7 +130,7 @@ func (sc *statCollector) StartCollection(streamID uint32) {
 					InboundRTP: results.ResultRowInboundRTP{
 						PacketsReceived:       recordedStats.InboundRTPStreamStats.PacketsReceived,
 						PacketsLost:           recordedStats.InboundRTPStreamStats.PacketsLost,
-						RoundTripTime:         recordedStats.RemoteOutboundRTPStreamStats.RoundTripTime.Milliseconds(),
+						RoundTripTime:         float64(recordedStats.RemoteOutboundRTPStreamStats.RoundTripTime.Milliseconds()) / 1000.0,
 						Jitter:                recordedStats.InboundRTPStreamStats.Jitter,
 						MillisSinceLastPacket: uint64(now.Sub(recordedStats.InboundRTPStreamStats.LastPacketReceivedTimestamp).Milliseconds()),
 						HeaderBytesReceived:   recordedStats.InboundRTPStreamStats.HeaderBytesReceived,
@@ -138,7 +141,7 @@ func (sc *statCollector) StartCollection(streamID uint32) {
 					},
 					OutboundRTP: results.ResultRowOutboundRTP{
 						PacketsSent:     recordedStats.OutboundRTPStreamStats.PacketsSent,
-						RoundTripTime:   recordedStats.RemoteInboundRTPStreamStats.RoundTripTime.Milliseconds(),
+						RoundTripTime:   float64(recordedStats.RemoteOutboundRTPStreamStats.RoundTripTime.Milliseconds()) / 1000.0,
 						BytesSent:       recordedStats.OutboundRTPStreamStats.BytesSent,
 						HeaderBytesSent: recordedStats.OutboundRTPStreamStats.HeaderBytesSent,
 						NACKCount:       recordedStats.OutboundRTPStreamStats.NACKCount,

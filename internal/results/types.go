@@ -15,7 +15,7 @@ type ResultRow struct {
 type ResultRowInboundRTP struct {
 	PacketsReceived              uint64
 	PacketsLost                  int64
-	RoundTripTime                int64
+	RoundTripTime                float64
 	Jitter                       float64
 	MillisSinceLastPacket        uint64
 	HeaderBytesReceived          uint64
@@ -34,7 +34,7 @@ type ResultRowInboundRTP struct {
 
 type ResultRowOutboundRTP struct {
 	PacketsSent     uint64
-	RoundTripTime   int64
+	RoundTripTime   float64
 	BytesSent       uint64
 	HeaderBytesSent uint64
 	NACKCount       uint32
