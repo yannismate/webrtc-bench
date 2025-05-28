@@ -77,7 +77,7 @@ func (fw *fakeRTPDataWriter) Start() uint32 {
 
 func (fw *fakeRTPDataWriter) SetBitrate(targetBitrate int) {
 	// Target bitrate should always be at least 30kbps, as this is the minimum bitrate WebRTC video
-	fw.codec.SetTargetBitrate(min(targetBitrate, 30_000))
+	fw.codec.SetTargetBitrate(max(targetBitrate, 30_000))
 }
 
 func (fw *fakeRTPDataWriter) Stop() {

@@ -99,7 +99,7 @@ func (c *CaseVideoPion) Start() error {
 			return err
 		}
 		bwe.OnTargetBitrateChange(func(bitrate int) {
-			c.testSource.SetBitrate(max(bitrate, c.targetBitrate))
+			c.testSource.SetBitrate(min(bitrate, c.targetBitrate))
 		})
 		c.statCollector.AddGCCEstimatorCollection(bwe)
 
@@ -123,7 +123,7 @@ func (c *CaseVideoPion) Start() error {
 
 		go func() {
 			for br := range bitrateUpdateNotifier {
-				c.testSource.SetBitrate(max(br, c.targetBitrate))
+				c.testSource.SetBitrate(min(br, c.targetBitrate))
 			}
 		}()
 
