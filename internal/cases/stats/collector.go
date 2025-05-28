@@ -1,10 +1,12 @@
 package stats
 
 import (
+	"strconv"
 	"sync"
 	"time"
 	"webrtc-bench/internal/pion/scream"
 	"webrtc-bench/internal/results"
+	"webrtc-bench/internal/util"
 
 	"github.com/pion/interceptor/pkg/gcc"
 	"github.com/pion/interceptor/pkg/stats"
@@ -107,7 +109,16 @@ func (sc *statCollector) StartCollection(streamID uint32) {
 
 				if sc.screamSi != nil {
 					screamStatMap := sc.screamSi.GetStats()
-					log.Info().Msgf("Scream stats: %v", screamStatMap)
+
+					screamStats = &results.ScreamStats{
+						QueueDelay:       util.AssumeNoErr(strconv.ParseFloat(screamStatMap["queueDelay"].(string), 64)),
+						QueueDelayMax:    util.AssumeNoErr(strconv.ParseFloat(screamStatMap["queueDelayMax"].(string), 64)),
+						QueueDelayMinAvg: util.AssumeNoErr(strconv.ParseFloat(screamStatMap["queueDelayMinAvg"].(string), 64)),
+						CWND:             uint32(util.AssumeNoErr(strconv.ParseUint(screamStatMap["cwnd"].(string), 10, 32))),
+						BytesInFlightLog: uint32(util.AssumeNoErr(strconv.ParseUint(screamStatMap["bytesInFlightLog"].(string), 10, 32))),
+						IsInFastStart:    screamStatMap["isInFastStart"].(string) == "1",
+						TargetBitrate:    uint32(util.AssumeNoErr(strconv.ParseUint(screamStatMap["targetBitrate"].(string), 10, 32))),
+					}
 				}
 
 				now := time.Now()
@@ -134,7 +145,7 @@ func (sc *statCollector) StartCollection(streamID uint32) {
 						FIRCount:        recordedStats.OutboundRTPStreamStats.FIRCount,
 						PLICount:        recordedStats.OutboundRTPStreamStats.PLICount,
 					},
-					GCCStats: gccStats,
+					GCCStats:    gccStats,
 					ScreamStats: screamStats,
 				})
 			}

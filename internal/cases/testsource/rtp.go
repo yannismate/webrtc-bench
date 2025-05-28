@@ -1,7 +1,6 @@
 package testsource
 
 import (
-	"errors"
 	"github.com/mengelbart/syncodec"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
