@@ -12,7 +12,7 @@ import (
 
 type FakeRTPDataWriter interface {
 	CreateTrack(peerConnection *webrtc.PeerConnection) error
-	Start() uint32
+	Start() (uint32, uint32)
 	SetBitrate(targetBitrate int)
 	Stop()
 }
@@ -55,7 +55,7 @@ func (fw *fakeRTPDataWriter) CreateTrack(peerConnection *webrtc.PeerConnection) 
 	return nil
 }
 
-func (fw *fakeRTPDataWriter) Start() uint32 {
+func (fw *fakeRTPDataWriter) Start() (uint32, uint32) {
 	go fw.codec.Start()
 
 	go func() {
@@ -72,7 +72,7 @@ func (fw *fakeRTPDataWriter) Start() uint32 {
 
 	}()
 
-	return uint32(fw.rtpSender.GetParameters().Encodings[0].SSRC)
+	return uint32(fw.rtpSender.GetParameters().Encodings[0].SSRC), uint32(fw.rtpSender.GetParameters().Encodings[0].RTX.SSRC)
 }
 
 func (fw *fakeRTPDataWriter) SetBitrate(targetBitrate int) {

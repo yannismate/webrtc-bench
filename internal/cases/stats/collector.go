@@ -15,7 +15,7 @@ import (
 type StatCollector interface {
 	GetPionInterceptorFactory() *stats.InterceptorFactory
 	SetInterval(interval time.Duration)
-	StartCollection(streamID uint32)
+	StartCollection(streamID uint32, rtxID uint32)
 	StopCollection()
 	RecordRow(row results.ResultRow)
 	AddGCCEstimatorCollection(bwe *gcc.SendSideBWE)
@@ -78,7 +78,7 @@ func (sc *statCollector) AddScreamSenderCollection(screamSi *scream.SenderInterc
 	sc.screamSi = screamSi
 }
 
-func (sc *statCollector) StartCollection(streamID uint32) {
+func (sc *statCollector) StartCollection(streamID uint32, rtxID uint32) {
 	go func() {
 		sc.usingStopChannel = true
 		ticker := time.NewTicker(sc.collectionInterval)
@@ -124,25 +124,41 @@ func (sc *statCollector) StartCollection(streamID uint32) {
 					}
 				}
 
+				var rtxBytesReceived uint64
+				var rtxPacketsReceived uint64
+				var rtxPacketsSent uint64
+				var rtxBytesSent uint64
+				if streamID != rtxID && rtxID != 0 {
+					rtxStats := sc.statsGetter.Get(rtxID)
+					if rtxStats != nil {
+						rtxBytesReceived = rtxStats.InboundRTPStreamStats.BytesReceived
+						rtxPacketsReceived = rtxStats.InboundRTPStreamStats.PacketsReceived
+						rtxBytesSent = rtxStats.OutboundRTPStreamStats.BytesSent
+						rtxPacketsSent = rtxStats.OutboundRTPStreamStats.PacketsSent
+					}
+				}
+
 				now := time.Now()
 				sc.resultWriter.WriteRow(results.ResultRow{
 					Timestamp: now,
 					InboundRTP: results.ResultRowInboundRTP{
-						PacketsReceived:       recordedStats.InboundRTPStreamStats.PacketsReceived,
-						PacketsLost:           recordedStats.InboundRTPStreamStats.PacketsLost,
-						RoundTripTime:         float64(recordedStats.RemoteOutboundRTPStreamStats.RoundTripTime.Milliseconds()) / 1000.0,
-						Jitter:                recordedStats.InboundRTPStreamStats.Jitter,
-						MillisSinceLastPacket: uint64(now.Sub(recordedStats.InboundRTPStreamStats.LastPacketReceivedTimestamp).Milliseconds()),
-						HeaderBytesReceived:   recordedStats.InboundRTPStreamStats.HeaderBytesReceived,
-						BytesReceived:         recordedStats.InboundRTPStreamStats.BytesReceived,
-						FIRCount:              recordedStats.InboundRTPStreamStats.FIRCount,
-						PLICount:              recordedStats.InboundRTPStreamStats.PLICount,
-						NACKCount:             recordedStats.InboundRTPStreamStats.NACKCount,
+						PacketsReceived:              recordedStats.InboundRTPStreamStats.PacketsReceived + rtxPacketsReceived,
+						PacketsLost:                  recordedStats.InboundRTPStreamStats.PacketsLost,
+						RoundTripTime:                float64(recordedStats.RemoteOutboundRTPStreamStats.RoundTripTime.Milliseconds()) / 1000.0,
+						Jitter:                       recordedStats.InboundRTPStreamStats.Jitter,
+						MillisSinceLastPacket:        uint64(now.Sub(recordedStats.InboundRTPStreamStats.LastPacketReceivedTimestamp).Milliseconds()),
+						HeaderBytesReceived:          recordedStats.InboundRTPStreamStats.HeaderBytesReceived,
+						BytesReceived:                recordedStats.InboundRTPStreamStats.BytesReceived + rtxBytesReceived,
+						FIRCount:                     recordedStats.InboundRTPStreamStats.FIRCount,
+						PLICount:                     recordedStats.InboundRTPStreamStats.PLICount,
+						NACKCount:                    recordedStats.InboundRTPStreamStats.NACKCount,
+						RetransmittedBytesReceived:   &rtxBytesReceived,
+						RetransmittedPacketsReceived: &rtxPacketsReceived,
 					},
 					OutboundRTP: results.ResultRowOutboundRTP{
-						PacketsSent:     recordedStats.OutboundRTPStreamStats.PacketsSent,
+						PacketsSent:     recordedStats.OutboundRTPStreamStats.PacketsSent + rtxPacketsSent,
 						RoundTripTime:   float64(recordedStats.RemoteOutboundRTPStreamStats.RoundTripTime.Milliseconds()) / 1000.0,
-						BytesSent:       recordedStats.OutboundRTPStreamStats.BytesSent,
+						BytesSent:       recordedStats.OutboundRTPStreamStats.BytesSent + rtxBytesSent,
 						HeaderBytesSent: recordedStats.OutboundRTPStreamStats.HeaderBytesSent,
 						NACKCount:       recordedStats.OutboundRTPStreamStats.NACKCount,
 						FIRCount:        recordedStats.OutboundRTPStreamStats.FIRCount,

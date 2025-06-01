@@ -185,7 +185,7 @@ func (c *CaseVideoPion) Start() error {
 	})
 
 	peerConnection.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		c.statCollector.StartCollection(uint32(remoteTrack.SSRC()))
+		c.statCollector.StartCollection(uint32(remoteTrack.SSRC()), uint32(remoteTrack.RtxSSRC()))
 
 		for {
 			// read and discard RTP stream
