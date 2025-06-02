@@ -47,3 +47,11 @@ const (
 	PeerSignalTypeSDP        PeerSignalType = "sdp"
 	PeerSignalTypeCandidates PeerSignalType = "candidates"
 )
+
+type FECType string
+
+const (
+	FECTypeDisabled FECType = "disabled"
+	FECTypeFlexFEC  FECType = "flex"
+	FECTypeULPFEC   FECType = "ulp"
+)

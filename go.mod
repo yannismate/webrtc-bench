@@ -12,7 +12,7 @@ require (
 	github.com/mengelbart/scream-go v0.4.0
 	github.com/mengelbart/syncodec v0.0.0-20220105132658-94ec57e63a65
 	github.com/parquet-go/parquet-go v0.25.0
-	github.com/pion/interceptor v0.1.37
+	github.com/pion/interceptor v0.1.38
 	github.com/pion/logging v0.2.3
 	github.com/pion/rtcp v1.2.15
 	github.com/pion/rtp v1.8.15

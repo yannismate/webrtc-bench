@@ -2,6 +2,7 @@ const iceServers = ICE_SERVERS.map((iceUrl) => ({urls: iceUrl}));
 const doOffer = DO_OFFER;
 const statIntervalMs = STAT_INTERVAL_MS;
 const maxBitrate = BITRATE;
+const fecType = FEC_TYPE;
 
 function log(msg) {
     if (msg instanceof String) {
@@ -127,7 +128,13 @@ async function stop() {
 
 async function receiveManagementMessage(type, msgString) {
     if (type === "sdp") {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(msgString)));
+        let sdpObj = JSON.parse(msgString);
+        if (fecType !== "ulp") {
+            sdpObj.sdp = sdpObj.sdp.split("\n").filter(line => !line.includes("ulpfec")).join("\n");
+        }
+        log("SDP: " + sdpObj.sdp);
+
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(sdpObj));
 
         if (!doOffer) {
             log("Sending answer");

@@ -27,6 +27,7 @@ type CaseVideoChrome struct {
 	sendSignal           func(signalType PeerSignalType, data []byte) error
 	chromeSignalMutex    sync.Mutex
 	statCollector        stats.StatCollector
+	fecType              FECType
 }
 
 //go:embed chrome_video.js
@@ -58,6 +59,13 @@ func (c *CaseVideoChrome) Configure(config PeerCaseConfig, sendSignal func(signa
 		return errors.New("chrome test case does not support custom congestion_control")
 	}
 
+	fecTypeStr, ok := config.AdditionalConfig["fec"]
+	if ok {
+		c.fecType = FECType(fecTypeStr)
+	} else {
+		c.fecType = FECTypeDisabled
+	}
+
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("allow-file-access-from-files", true),
 		chromedp.Flag("disable-gesture-requirement-for-media-playback", true),
@@ -65,6 +73,11 @@ func (c *CaseVideoChrome) Configure(config PeerCaseConfig, sendSignal func(signa
 		chromedp.Flag("use-fake-device-for-media-stream", true),
 		chromedp.Flag("use-file-for-fake-video-capture", videoFilePath),
 	)
+
+	if c.fecType == FECTypeFlexFEC {
+		opts = append(opts,
+			chromedp.Flag("force-fieldtrials", "WebRTC-FlexFEC-03-Advertised/Enabled/WebRTC-FlexFEC-03/Enabled"))
+	}
 
 	parentCtx, parentCtxCancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	browserContext, browserContextCancel := chromedp.NewContext(parentCtx)
@@ -79,6 +92,7 @@ func (c *CaseVideoChrome) Configure(config PeerCaseConfig, sendSignal func(signa
 	setParamsJs += "const DO_OFFER = " + strconv.FormatBool(config.SendOffer) + ";\n"
 	setParamsJs += "const STAT_INTERVAL_MS = " + strconv.FormatInt(time.Duration(config.StatInterval).Milliseconds(), 10) + ";\n"
 	setParamsJs += "const BITRATE = " + bitrateStr + ";\n"
+	setParamsJs += "const FEC_TYPE = " + string(c.fecType) + ";\n"
 
 	emptyPagePath := path.Join(cwd, "testdata", "empty_page.html")
 	log.Debug().Msgf("Loading empty page from %s", emptyPagePath)

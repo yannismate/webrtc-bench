@@ -3,6 +3,7 @@ package cases
 import (
 	"encoding/json"
 	"errors"
+	"github.com/pion/interceptor/pkg/flexfec"
 	"strconv"
 	"sync"
 	"time"
@@ -24,6 +25,7 @@ type CaseVideoPion struct {
 	peerConnection        *webrtc.PeerConnection
 	congestionControlType congestionControlType
 	targetBitrate         int
+	fecType               FECType
 
 	pendingCandidates []*webrtc.ICECandidate
 	candidatesMux     sync.Mutex
@@ -67,6 +69,13 @@ func (c *CaseVideoPion) Configure(config PeerCaseConfig, sendSignal func(signalT
 		c.congestionControlType = congestionControlType(cct)
 	} else {
 		c.congestionControlType = noCongestionControl
+	}
+
+	fecTypeStr, ok := config.AdditionalConfig["fec"]
+	if ok {
+		c.fecType = FECType(fecTypeStr)
+	} else {
+		c.fecType = FECTypeDisabled
 	}
 
 	c.testSource = testsource.NewFakeRTPDataWriter(bitrate)
@@ -139,6 +148,16 @@ func (c *CaseVideoPion) Start() error {
 		icRegistry.Add(receiverInterceptor)
 	default:
 		log.Fatal().Msgf("invalid congestion control type: %s", c.congestionControlType)
+	}
+
+	if c.fecType == FECTypeFlexFEC {
+		flexFexInterceptor, err := flexfec.NewFecInterceptor()
+		if err != nil {
+			return err
+		}
+		icRegistry.Add(flexFexInterceptor)
+	} else if c.fecType != FECTypeDisabled {
+		log.Fatal().Msgf("Invalid FEC type for Pion: %s", c.fecType)
 	}
 
 	if c.sendOffer {
