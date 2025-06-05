@@ -92,7 +92,7 @@ func (c *CaseVideoChrome) Configure(config PeerCaseConfig, sendSignal func(signa
 	setParamsJs += "const DO_OFFER = " + strconv.FormatBool(config.SendOffer) + ";\n"
 	setParamsJs += "const STAT_INTERVAL_MS = " + strconv.FormatInt(time.Duration(config.StatInterval).Milliseconds(), 10) + ";\n"
 	setParamsJs += "const BITRATE = " + bitrateStr + ";\n"
-	setParamsJs += "const FEC_TYPE = " + string(c.fecType) + ";\n"
+	setParamsJs += "const FEC_TYPE = '" + string(c.fecType) + "';\n"
 
 	emptyPagePath := path.Join(cwd, "testdata", "empty_page.html")
 	log.Debug().Msgf("Loading empty page from %s", emptyPagePath)
