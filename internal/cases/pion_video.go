@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pion/interceptor/pkg/flexfec"
+	"io"
 	"strconv"
 	"sync"
 	"time"
@@ -210,7 +211,9 @@ func (c *CaseVideoPion) Start() error {
 			// read and discard RTP stream
 			_, _, readErr := remoteTrack.ReadRTP()
 			if readErr != nil {
-				log.Error().Err(readErr).Msgf("Error reading from remote track")
+				if readErr != io.EOF {
+					log.Error().Err(readErr).Msgf("Error reading from remote track")
+				}
 				_ = peerConnection.Close()
 				break
 			}

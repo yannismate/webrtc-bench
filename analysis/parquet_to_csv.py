@@ -26,6 +26,11 @@ def convert_parquet_to_csv(src: Path) -> Path:
     df = pd.read_parquet(src)
     df = _flatten(df)
     df = df.dropna(axis=1, how='all')
+
+    # Drop consecutive rows with the same timestamp, keeping only the first occurrence
+    if 'timestamp' in df.columns:
+        df = df.loc[df['timestamp'].shift() != df['timestamp']]
+
     dest = src.with_suffix(".csv")
     df.to_csv(dest, index=False)
     return dest

@@ -39,6 +39,9 @@ df = table.to_pandas().rename(
     }
 )
 
+# Drop rows with duplicate timestamps
+df = df.loc[df["Timestamp"].shift() != df["Timestamp"]]
+
 if "PacketsReceived" not in df or df["PacketsReceived"].isna().all() or (df["PacketsReceived"] == 0).all():
     graph_packet_loss = False
 else:
@@ -46,7 +49,29 @@ else:
 
 df.set_index("Timestamp", inplace=True)
 period = f"{int(window_sec * 1000)}ms"
-binned = df.resample(period).last()
+
+# Convert Timestamp to datetime if not already and ensure timezone-naive
+df.index = pd.to_datetime(df.index).tz_localize(None)
+
+# Calculate seconds from test start
+start_time = df.index[0]
+df["SecondsFromStart"] = (df.index - start_time).total_seconds()
+
+# Create a new column for grouping based on the aggregation window
+df["TimeGroup"] = (df["SecondsFromStart"] // window_sec).astype(int)
+
+# Aggregate using groupby and last
+binned = df.groupby("TimeGroup").agg({
+    "BytesReceived": "last",
+    "HeaderBytesReceived": "last",
+    "PacketsReceived": "last",
+    "PacketsLost": "last",
+    "BytesSent": "last",
+    "HeaderBytesSent": "last"
+})
+
+# Reset index and convert TimeGroup to seconds from start
+binned.index = binned.index * window_sec
 
 binned["GoodBytesReceived"] = binned["BytesReceived"] - binned["HeaderBytesReceived"]
 binned["GoodBytesSent"] = binned["BytesSent"] - binned["HeaderBytesSent"]
@@ -60,19 +85,34 @@ binned["Recv_Good_Bps"] = binned["GoodBytesReceived"].diff() / window_sec
 binned["Sent_Good_Bps"] = binned["GoodBytesSent"].diff() / window_sec
 binned = binned.iloc[1:]
 
+if (binned["Recv_Bps"] == 0).all():
+    exclude_recv_bps = True
+else:
+    exclude_recv_bps = False
+
+if (binned["Sent_Bps"] == 0).all():
+    exclude_sent_bps = True
+else:
+    exclude_sent_bps = False
+
 fig, ax1 = plt.subplots()
 
-ax1.plot(binned.index, binned["Sent_Bps"] * 8 / 1000, label="Throughput Sent", color="orange", linestyle=":")
-ax1.plot(binned.index, binned["Recv_Bps"] * 8 / 1000, label="Throughput Received", color="green", linestyle=":")
-ax1.plot(binned.index, binned["Sent_Good_Bps"] * 8 / 1000, label="Goodput Sent", color="orange", linestyle="-")
-ax1.plot(binned.index, binned["Recv_Good_Bps"] * 8 / 1000, label="Goodput Received", color="green", linestyle="-")
-ax1.set_xlabel(f"Time (aggregated every {window_sec}s)")
+if not exclude_sent_bps:
+    ax1.plot(binned.index, binned["Sent_Bps"] * 8 / 1000, label="Throughput Sent", color="orange", linestyle=":")
+    ax1.plot(binned.index, binned["Sent_Good_Bps"] * 8 / 1000, label="Goodput Sent", color="orange", linestyle="-")
+
+if not exclude_recv_bps:
+    ax1.plot(binned.index, binned["Recv_Bps"] * 8 / 1000, label="Throughput Received", color="green", linestyle=":")
+    ax1.plot(binned.index, binned["Recv_Good_Bps"] * 8 / 1000, label="Goodput Received", color="green", linestyle="-")
+
+ax1.set_xlabel(f"Time")
 ax1.set_ylabel("Kbit/s")
 
 if graph_packet_loss:
     ax2 = ax1.twinx()
     ax2.plot(binned.index, binned["PacketLossRate"] * 100, label="Packet Loss", color="red", linestyle="-")
     ax2.set_ylabel("%")
+    ax2.set_ylim(0, 100)  # Ensure loss axis scale is always 0-100%
 
 plt.legend()
 plt.tight_layout()
