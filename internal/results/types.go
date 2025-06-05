@@ -6,8 +6,8 @@ import (
 
 type ResultRow struct {
 	Timestamp   time.Time
-	InboundRTP  ResultRowInboundRTP
-	OutboundRTP ResultRowOutboundRTP
+	InboundRTP  *ResultRowInboundRTP
+	OutboundRTP *ResultRowOutboundRTP
 	GCCStats    *GCCStats
 	ScreamStats *ScreamStats
 }

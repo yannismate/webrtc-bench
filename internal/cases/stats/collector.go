@@ -89,10 +89,59 @@ func (sc *statCollector) StartCollection(streamID uint32, rtxID uint32) {
 				return
 			case <-ticker.C:
 				recordedStats := sc.statsGetter.Get(streamID)
+
+				var rtxBytesReceived uint64
+				var rtxPacketsReceived uint64
+				var rtxPacketsSent uint64
+				var rtxBytesSent uint64
+				if streamID != rtxID && rtxID != 0 {
+					rtxStats := sc.statsGetter.Get(rtxID)
+					if rtxStats != nil {
+						rtxBytesReceived = rtxStats.InboundRTPStreamStats.BytesReceived
+						rtxPacketsReceived = rtxStats.InboundRTPStreamStats.PacketsReceived
+						rtxBytesSent = rtxStats.OutboundRTPStreamStats.BytesSent
+						rtxPacketsSent = rtxStats.OutboundRTPStreamStats.PacketsSent
+					}
+				}
+
+				var inboundStats *results.ResultRowInboundRTP
+				var outboundStats *results.ResultRowOutboundRTP
+
+				now := time.Now()
+
+				if recordedStats.InboundRTPStreamStats.PacketsReceived > 0 {
+					inboundStats = &results.ResultRowInboundRTP{
+						PacketsReceived:              recordedStats.InboundRTPStreamStats.PacketsReceived + rtxPacketsReceived,
+						PacketsLost:                  recordedStats.InboundRTPStreamStats.PacketsLost,
+						RoundTripTime:                float64(recordedStats.RemoteOutboundRTPStreamStats.RoundTripTime.Milliseconds()) / 1000.0,
+						Jitter:                       recordedStats.InboundRTPStreamStats.Jitter,
+						MillisSinceLastPacket:        uint64(now.Sub(recordedStats.InboundRTPStreamStats.LastPacketReceivedTimestamp).Milliseconds()),
+						HeaderBytesReceived:          recordedStats.InboundRTPStreamStats.HeaderBytesReceived,
+						BytesReceived:                recordedStats.InboundRTPStreamStats.BytesReceived + rtxBytesReceived,
+						FIRCount:                     recordedStats.InboundRTPStreamStats.FIRCount,
+						PLICount:                     recordedStats.InboundRTPStreamStats.PLICount,
+						NACKCount:                    recordedStats.InboundRTPStreamStats.NACKCount,
+						RetransmittedBytesReceived:   &rtxBytesReceived,
+						RetransmittedPacketsReceived: &rtxPacketsReceived,
+					}
+				}
+
+				if recordedStats.OutboundRTPStreamStats.PacketsSent > 0 {
+					outboundStats = &results.ResultRowOutboundRTP{
+						PacketsSent:     recordedStats.OutboundRTPStreamStats.PacketsSent + rtxPacketsSent,
+						RoundTripTime:   float64(recordedStats.RemoteOutboundRTPStreamStats.RoundTripTime.Milliseconds()) / 1000.0,
+						BytesSent:       recordedStats.OutboundRTPStreamStats.BytesSent + rtxBytesSent,
+						HeaderBytesSent: recordedStats.OutboundRTPStreamStats.HeaderBytesSent,
+						NACKCount:       recordedStats.OutboundRTPStreamStats.NACKCount,
+						FIRCount:        recordedStats.OutboundRTPStreamStats.FIRCount,
+						PLICount:        recordedStats.OutboundRTPStreamStats.PLICount,
+					}
+				}
+
 				var gccStats *results.GCCStats
 				var screamStats *results.ScreamStats
 
-				if sc.gccBwe != nil {
+				if sc.gccBwe != nil && outboundStats != nil {
 					gccStatMap := sc.gccBwe.GetStats()
 					gccStats = &results.GCCStats{
 						LossTargetBitrate:  uint32(gccStatMap["lossTargetBitrate"].(int)),
@@ -106,7 +155,7 @@ func (sc *statCollector) StartCollection(streamID uint32, rtxID uint32) {
 					}
 				}
 
-				if sc.screamSi != nil {
+				if sc.screamSi != nil && outboundStats != nil {
 					screamStatMap := sc.screamSi.GetStats()
 
 					if _, ok := screamStatMap["targetBitrate"]; ok {
@@ -124,46 +173,10 @@ func (sc *statCollector) StartCollection(streamID uint32, rtxID uint32) {
 					}
 				}
 
-				var rtxBytesReceived uint64
-				var rtxPacketsReceived uint64
-				var rtxPacketsSent uint64
-				var rtxBytesSent uint64
-				if streamID != rtxID && rtxID != 0 {
-					rtxStats := sc.statsGetter.Get(rtxID)
-					if rtxStats != nil {
-						rtxBytesReceived = rtxStats.InboundRTPStreamStats.BytesReceived
-						rtxPacketsReceived = rtxStats.InboundRTPStreamStats.PacketsReceived
-						rtxBytesSent = rtxStats.OutboundRTPStreamStats.BytesSent
-						rtxPacketsSent = rtxStats.OutboundRTPStreamStats.PacketsSent
-					}
-				}
-
-				now := time.Now()
 				sc.resultWriter.WriteRow(results.ResultRow{
-					Timestamp: now,
-					InboundRTP: results.ResultRowInboundRTP{
-						PacketsReceived:              recordedStats.InboundRTPStreamStats.PacketsReceived + rtxPacketsReceived,
-						PacketsLost:                  recordedStats.InboundRTPStreamStats.PacketsLost,
-						RoundTripTime:                float64(recordedStats.RemoteOutboundRTPStreamStats.RoundTripTime.Milliseconds()) / 1000.0,
-						Jitter:                       recordedStats.InboundRTPStreamStats.Jitter,
-						MillisSinceLastPacket:        uint64(now.Sub(recordedStats.InboundRTPStreamStats.LastPacketReceivedTimestamp).Milliseconds()),
-						HeaderBytesReceived:          recordedStats.InboundRTPStreamStats.HeaderBytesReceived,
-						BytesReceived:                recordedStats.InboundRTPStreamStats.BytesReceived + rtxBytesReceived,
-						FIRCount:                     recordedStats.InboundRTPStreamStats.FIRCount,
-						PLICount:                     recordedStats.InboundRTPStreamStats.PLICount,
-						NACKCount:                    recordedStats.InboundRTPStreamStats.NACKCount,
-						RetransmittedBytesReceived:   &rtxBytesReceived,
-						RetransmittedPacketsReceived: &rtxPacketsReceived,
-					},
-					OutboundRTP: results.ResultRowOutboundRTP{
-						PacketsSent:     recordedStats.OutboundRTPStreamStats.PacketsSent + rtxPacketsSent,
-						RoundTripTime:   float64(recordedStats.RemoteOutboundRTPStreamStats.RoundTripTime.Milliseconds()) / 1000.0,
-						BytesSent:       recordedStats.OutboundRTPStreamStats.BytesSent + rtxBytesSent,
-						HeaderBytesSent: recordedStats.OutboundRTPStreamStats.HeaderBytesSent,
-						NACKCount:       recordedStats.OutboundRTPStreamStats.NACKCount,
-						FIRCount:        recordedStats.OutboundRTPStreamStats.FIRCount,
-						PLICount:        recordedStats.OutboundRTPStreamStats.PLICount,
-					},
+					Timestamp:   now,
+					InboundRTP:  inboundStats,
+					OutboundRTP: outboundStats,
 					GCCStats:    gccStats,
 					ScreamStats: screamStats,
 				})
