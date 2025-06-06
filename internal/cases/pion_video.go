@@ -112,10 +112,26 @@ func (c *CaseVideoPion) Start() error {
 		icRegistry.Add(rr)
 
 		// 4. CC
+		err = webrtc.ConfigureCongestionControlFeedback(&mediaEngine, &icRegistry)
+		if err != nil {
+			return err
+		}
+
 		switch c.congestionControlType {
 		case noCongestionControl:
 			log.Warn().Msg("Congestion control is set to none")
 		case gccCongestionControl:
+			bwe, err := gcc.NewSendSideBWE()
+			if err != nil {
+				return err
+			}
+
+			ccFactory, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) { return bwe, err })
+			if err != nil {
+				return err
+			}
+			icRegistry.Add(ccFactory)
+
 			if err := webrtc.ConfigureTWCCSender(&mediaEngine, &icRegistry); err != nil {
 				return err
 			}
