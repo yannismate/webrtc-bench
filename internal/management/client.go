@@ -89,7 +89,7 @@ func (c *client) Start() {
 		for {
 			msgType, msg, err := conn.ReadMessage()
 			if err != nil {
-				log.Error().Err(err).Msg("Error reading from Management WS")
+				log.Fatal().Err(err).Msg("Error reading from Management WS")
 				return
 			}
 
@@ -100,7 +100,7 @@ func (c *client) Start() {
 			outerMsg := MessageContainer{}
 			err = json.Unmarshal(msg, &outerMsg)
 			if err != nil {
-				log.Warn().Err(err).Msg("Could not parse received WS message")
+				log.Fatal().Err(err).Msg("Could not parse received WS message")
 				_ = conn.Close()
 				return
 			}
