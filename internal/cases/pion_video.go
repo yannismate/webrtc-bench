@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pion/interceptor/pkg/flexfec"
+	"github.com/pion/interceptor/pkg/report"
 	"io"
 	"strconv"
 	"sync"
@@ -92,76 +93,129 @@ func (c *CaseVideoPion) Start() error {
 
 	icRegistry := interceptor.Registry{}
 
-	// Stat interceptor should record packets before any other interceptors modify them on the receiving end
 	if !c.sendOffer {
+		// Configure receiver interceptors in order
+
+		// 1. Stats
 		icRegistry.Add(c.statCollector.GetPionInterceptorFactory())
-	}
 
-	err = webrtc.RegisterDefaultInterceptors(&mediaEngine, &icRegistry)
+		// 2. NACK
+		if err := webrtc.ConfigureNack(&mediaEngine, &icRegistry); err != nil {
+			return err
+		}
 
-	switch c.congestionControlType {
-	case noCongestionControl:
-		log.Warn().Msg("Congestion control is set to none")
-	case gccCongestionControl:
-		bwe, err := gcc.NewSendSideBWE(gcc.SendSideBWEInitialBitrate(c.targetBitrate/2),
-			gcc.SendSideBWEMaxBitrate(c.targetBitrate*2))
+		// 3. RR
+		rr, err := report.NewReceiverInterceptor()
 		if err != nil {
 			return err
 		}
-		bwe.OnTargetBitrateChange(func(bitrate int) {
-			c.testSource.SetBitrate(min(bitrate, c.targetBitrate))
-		})
-		c.statCollector.AddGCCEstimatorCollection(bwe)
+		icRegistry.Add(rr)
 
-		ccFactory, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) { return bwe, err })
+		// 4. CC
+		switch c.congestionControlType {
+		case noCongestionControl:
+			log.Warn().Msg("Congestion control is set to none")
+		case gccCongestionControl:
+			if err := webrtc.ConfigureTWCCSender(&mediaEngine, &icRegistry); err != nil {
+				return err
+			}
+		case screamCongestionControl:
+			receiverInterceptor, err := scream.NewReceiverInterceptor()
+			if err != nil {
+				return err
+			}
+
+			icRegistry.Add(receiverInterceptor)
+		default:
+			log.Fatal().Msgf("invalid congestion control type: %s", c.congestionControlType)
+		}
+
+		// 5. FCC
+		if c.fecType == FECTypeFlexFEC {
+			flexFexInterceptor, err := flexfec.NewFecInterceptor()
+			if err != nil {
+				return err
+			}
+			icRegistry.Add(flexFexInterceptor)
+		} else if c.fecType != FECTypeDisabled {
+			log.Fatal().Msgf("Invalid FEC type for Pion: %s", c.fecType)
+		}
+
+	} else {
+		// Configure sender interceptors in order
+		// 1. SR
+		sr, err := report.NewSenderInterceptor()
 		if err != nil {
 			return err
 		}
-		icRegistry.Add(ccFactory)
+		icRegistry.Add(sr)
 
+		// 2. CC
+		switch c.congestionControlType {
+		case noCongestionControl:
+			log.Warn().Msg("Congestion control is set to none")
+		case gccCongestionControl:
+			bwe, err := gcc.NewSendSideBWE(gcc.SendSideBWEInitialBitrate(c.targetBitrate/2),
+				gcc.SendSideBWEMaxBitrate(c.targetBitrate*2))
+			if err != nil {
+				return err
+			}
+			bwe.OnTargetBitrateChange(func(bitrate int) {
+				c.testSource.SetBitrate(min(bitrate, c.targetBitrate))
+			})
+			c.statCollector.AddGCCEstimatorCollection(bwe)
+
+			ccFactory, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) { return bwe, err })
+			if err != nil {
+				return err
+			}
+			icRegistry.Add(ccFactory)
+		case screamCongestionControl:
+			var bitrateUpdateNotifier = make(chan int)
+			senderInterceptor, err := scream.NewSenderInterceptor(
+				scream.MaxBitrate(float64(2*c.targetBitrate)),
+				scream.InitialBitrate(float64(c.targetBitrate/2)),
+				scream.TotalBitrateChangeNotifier(bitrateUpdateNotifier),
+				scream.OnSenderInterceptorCreated(c.statCollector.AddScreamSenderCollection))
+
+			go func() {
+				for br := range bitrateUpdateNotifier {
+					c.testSource.SetBitrate(min(br, c.targetBitrate))
+				}
+			}()
+
+			if err != nil {
+				return err
+			}
+
+			icRegistry.Add(senderInterceptor)
+		default:
+			log.Fatal().Msgf("invalid congestion control type: %s", c.congestionControlType)
+		}
+
+		// 3. TWCC
 		err = webrtc.ConfigureTWCCHeaderExtensionSender(&mediaEngine, &icRegistry)
 		if err != nil {
 			return err
 		}
-	case screamCongestionControl:
-		var bitrateUpdateNotifier = make(chan int)
-		senderInterceptor, err := scream.NewSenderInterceptor(
-			scream.MaxBitrate(float64(2*c.targetBitrate)),
-			scream.InitialBitrate(float64(c.targetBitrate/2)),
-			scream.TotalBitrateChangeNotifier(bitrateUpdateNotifier),
-			scream.OnSenderInterceptorCreated(c.statCollector.AddScreamSenderCollection))
 
-		go func() {
-			for br := range bitrateUpdateNotifier {
-				c.testSource.SetBitrate(min(br, c.targetBitrate))
+		// 4. FCC
+		if c.fecType == FECTypeFlexFEC {
+			flexFexInterceptor, err := flexfec.NewFecInterceptor()
+			if err != nil {
+				return err
 			}
-		}()
-
-		if err != nil {
-			return err
-		}
-		receiverInterceptor, err := scream.NewReceiverInterceptor()
-		if err != nil {
-			return err
+			icRegistry.Add(flexFexInterceptor)
+		} else if c.fecType != FECTypeDisabled {
+			log.Fatal().Msgf("Invalid FEC type for Pion: %s", c.fecType)
 		}
 
-		icRegistry.Add(senderInterceptor)
-		icRegistry.Add(receiverInterceptor)
-	default:
-		log.Fatal().Msgf("invalid congestion control type: %s", c.congestionControlType)
-	}
-
-	if c.fecType == FECTypeFlexFEC {
-		flexFexInterceptor, err := flexfec.NewFecInterceptor()
-		if err != nil {
+		// 5. NACK
+		if err := webrtc.ConfigureNack(&mediaEngine, &icRegistry); err != nil {
 			return err
 		}
-		icRegistry.Add(flexFexInterceptor)
-	} else if c.fecType != FECTypeDisabled {
-		log.Fatal().Msgf("Invalid FEC type for Pion: %s", c.fecType)
-	}
 
-	if c.sendOffer {
+		// 6. Stats
 		icRegistry.Add(c.statCollector.GetPionInterceptorFactory())
 	}
 

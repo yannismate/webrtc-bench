@@ -6,13 +6,14 @@ package scream
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/rs/zerolog/log"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/mengelbart/scream-go"
 	"github.com/pion/interceptor"
-	"github.com/pion/logging"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 )
@@ -62,7 +63,6 @@ func (f *SenderInterceptorFactory) NewInterceptor(id string) (interceptor.Interc
 		wg:             sync.WaitGroup{},
 		tx:             scream.NewTx(),
 		close:          make(chan struct{}),
-		log:            logging.NewDefaultLoggerFactory().NewLogger("scream_sender"),
 		newRTPQueue:    newQueue,
 		rtpStreams:     map[uint32]*localStream{},
 		rtpStreamsMu:   sync.Mutex{},
@@ -88,7 +88,6 @@ type SenderInterceptor struct {
 	wg    sync.WaitGroup
 	tx    *scream.Tx
 	close chan struct{}
-	log   logging.LeveledLogger
 
 	newRTPQueue  func() RTPQueue
 	rtpStreams   map[uint32]*localStream
@@ -129,8 +128,10 @@ func (s *SenderInterceptor) BindRTCPReader(reader interceptor.RTCPReader) interc
 				ssrcs = extractSSRCs(*report)
 			case *rtcp.CCFeedbackReport:
 				ssrcs = extractSSRCsReport(report)
+			case *rtcp.TransportLayerNack:
+			case *rtcp.ReceiverReport:
 			default:
-				s.log.Info("got incorrect packet type, skipping feedback")
+				log.Info().Msgf("got incorrect packet type %v, skipping feedback", reflect.TypeOf(pkt).String())
 				continue
 			}
 
@@ -219,6 +220,9 @@ func (s *SenderInterceptor) BindLocalStream(info *interceptor.StreamInfo, writer
 	go s.loop(writer, info.SSRC)
 
 	return interceptor.RTPWriterFunc(func(header *rtp.Header, payload []byte, attributes interceptor.Attributes) (int, error) {
+		if header.SSRC != info.SSRC {
+			return 0, nil
+		}
 		t := s.getTimeNTP(time.Now())
 
 		buf := make([]byte, len(payload))
@@ -229,7 +233,6 @@ func (s *SenderInterceptor) BindLocalStream(info *interceptor.StreamInfo, writer
 		rtpQueue.Enqueue(pkt, float64(t)/65536.0)
 		size := pkt.MarshalSize()
 		s.m.Lock()
-		//fmt.Printf("newMediaFrame at t=%v\n", t)
 		s.tx.NewMediaFrame(t, header.SSRC, size)
 		s.m.Unlock()
 		localStream.newFrame <- struct{}{}
@@ -269,7 +272,7 @@ func (s *SenderInterceptor) loop(writer interceptor.RTPWriter, ssrc uint32) {
 	stream := s.rtpStreams[ssrc]
 	s.rtpStreamsMu.Unlock()
 
-	defer s.log.Infof("leave send loop for ssrc: %v", ssrc)
+	defer log.Info().Msgf("leave send loop for ssrc: %v", ssrc)
 
 	for {
 		select {
@@ -300,7 +303,7 @@ func (s *SenderInterceptor) loop(writer interceptor.RTPWriter, ssrc uint32) {
 			}
 			// TODO: Forward attributes from above?
 			if _, err := writer.Write(&packet.Header, packet.Payload, interceptor.Attributes{}); err != nil {
-				s.log.Warnf("failed sending RTP packet: %+v", err)
+				log.Warn().Msgf("failed sending RTP packet: %+v", err)
 			}
 			s.m.Lock()
 			s.tx.AddTransmitted(s.getTimeNTP(time.Now()), ssrc, packet.MarshalSize(), packet.SequenceNumber, packet.Marker)
