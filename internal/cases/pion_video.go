@@ -98,11 +98,25 @@ func (c *CaseVideoPion) Start() error {
 		settings.SetDTLSKeyLogWriter(file)
 	}
 
-	err := mediaEngine.RegisterDefaultCodecs()
-	if err != nil {
-		return err
+	videoRTCPFeedback := []webrtc.RTCPFeedback{{"goog-remb", ""}, {"ccm", "fir"}, {"nack", ""}, {"nack", "pli"}}
+	for _, codec := range []webrtc.RTPCodecParameters{
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				MimeType: webrtc.MimeTypeH264, ClockRate: 90000,
+				SDPFmtpLine:  "level-asymmetry-allowed=1;packetization-mode=1",
+				RTCPFeedback: videoRTCPFeedback,
+			},
+			PayloadType: 102,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeRTX, ClockRate: 90000, SDPFmtpLine: "apt=102"},
+			PayloadType:        103,
+		},
+	} {
+		if err := mediaEngine.RegisterCodec(codec, webrtc.RTPCodecTypeVideo); err != nil {
+			return err
+		}
 	}
-
 	icRegistry := interceptor.Registry{}
 
 	if !c.sendOffer {
