@@ -33,7 +33,9 @@ func NewFakeRTPDataWriter(targetBitrate int) FakeRTPDataWriter {
 }
 
 func (fw *fakeRTPDataWriter) CreateTrack(transceiver *webrtc.RTPTransceiver) error {
-	localSample, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264}, "video", "pion")
+	videoRTCPFeedback := []webrtc.RTCPFeedback{{"goog-remb", ""}, {"ccm", "fir"}, {"nack", ""}, {"nack", "pli"}}
+
+	localSample, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, RTCPFeedback: videoRTCPFeedback}, "video", "pion")
 	if err != nil {
 		return err
 	}
