@@ -294,6 +294,7 @@ func (c *CaseVideoPion) Start() error {
 	})
 
 	peerConnection.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		log.Info().Msgf("Received Track on SSRC %v with RTX SSRC %v", remoteTrack.SSRC(), remoteTrack.RtxSSRC())
 		c.statCollector.StartCollection(uint32(remoteTrack.SSRC()), uint32(remoteTrack.RtxSSRC()))
 
 		for {
