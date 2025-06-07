@@ -85,6 +85,7 @@ github.com/wlynxg/anet v0.0.5 h1:J3VJGi1gvo0JwZ/P1/Yc/8p63SoW98B5dHkYDmpgvvU=
 github.com/wlynxg/anet v0.0.5/go.mod h1:eay5PRQr7fIVAMbTbchTnO9gG65Hg/uYGdc7mguHxoA=
 github.com/yannismate/pion-interceptor v0.1.38-0.20250607154533-480ce32c6efc h1:+E/9fbMKxXD/Maabxj+StGiP85RU7p3RLs8jpKI7qHU=
 github.com/yannismate/pion-interceptor v0.1.38-0.20250607154533-480ce32c6efc/go.mod h1:3IceU5uQaA0k7q76blAaw3HVw7n2Prq0WQRMNQJt9RY=
+github.com/yannismate/pion-interceptor v0.1.38-0.20250607160403-cb92d1ed9fa4/go.mod h1:3IceU5uQaA0k7q76blAaw3HVw7n2Prq0WQRMNQJt9RY=
 github.com/yannismate/pion-webrtc/v4 v4.0.0-20250607154802-f28561f574be h1:mV6jaNAWQPNnVbki13pX4vJMMnNeEm9eQFPhyGyWwl4=
 github.com/yannismate/pion-webrtc/v4 v4.0.0-20250607154802-f28561f574be/go.mod h1:+P9FWHHK1SW9OORYz5JT+HGlks9O+Gr4UUFyT067N34=
 golang.org/x/crypto v0.39.0 h1:SHs+kF4LP+f+p14esP5jAoDpHU8Gu/v9lFRK6IT5imM=
