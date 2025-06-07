@@ -6,6 +6,7 @@ import (
 	"github.com/pion/interceptor/pkg/flexfec"
 	"github.com/pion/interceptor/pkg/report"
 	"io"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -86,6 +87,17 @@ func (c *CaseVideoPion) Configure(config PeerCaseConfig, sendSignal func(signalT
 
 func (c *CaseVideoPion) Start() error {
 	mediaEngine := webrtc.MediaEngine{}
+	settings := webrtc.SettingEngine{}
+
+	if len(os.Getenv("EXPORT_DTLS_KEYS")) > 0 {
+		file, err := os.OpenFile(os.Getenv("EXPORT_DTLS_KEYS"), os.O_RDWR|os.O_CREATE, 0666)
+		if err != nil {
+			return err
+		}
+
+		settings.SetDTLSKeyLogWriter(file)
+	}
+
 	err := mediaEngine.RegisterDefaultCodecs()
 	if err != nil {
 		return err
@@ -226,7 +238,7 @@ func (c *CaseVideoPion) Start() error {
 		icRegistry.Add(c.statCollector.GetPionInterceptorFactory())
 	}
 
-	api := webrtc.NewAPI(webrtc.WithMediaEngine(&mediaEngine), webrtc.WithInterceptorRegistry(&icRegistry))
+	api := webrtc.NewAPI(webrtc.WithMediaEngine(&mediaEngine), webrtc.WithInterceptorRegistry(&icRegistry), webrtc.WithSettingEngine(settings))
 	peerConnection, err := api.NewPeerConnection(c.webrtcCfg)
 	c.peerConnection = peerConnection
 	if err != nil {
