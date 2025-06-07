@@ -79,12 +79,15 @@ github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZN
 github.com/rs/xid v1.6.0/go.mod h1:7XoLgs4eV+QndskICGsho+ADou8ySMSjJKDIan90Nz0=
 github.com/rs/zerolog v1.34.0 h1:k43nTLIwcTVQAncfCw4KZ2VY6ukYoZaBPNOE8txlOeY=
 github.com/rs/zerolog v1.34.0/go.mod h1:bJsvje4Z08ROH4Nhs5iH600c3IkWhwp44iRc54W6wYQ=
+github.com/sclevine/agouti v3.0.0+incompatible h1:8IBJS6PWz3uTlMP3YBIR5f+KAldcGuOeFkFbUWfBgK4=
+github.com/sclevine/agouti v3.0.0+incompatible/go.mod h1:b4WX9W9L1sfQKXeJf1mUTLZKJ48R1S7H23Ji7oFO5Bw=
 github.com/stretchr/testify v1.10.0 h1:Xv5erBjTwe/5IxqUQTdXv5kgmIvbHo3QQyRwhJsOfJA=
 github.com/stretchr/testify v1.10.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
 github.com/wlynxg/anet v0.0.5 h1:J3VJGi1gvo0JwZ/P1/Yc/8p63SoW98B5dHkYDmpgvvU=
 github.com/wlynxg/anet v0.0.5/go.mod h1:eay5PRQr7fIVAMbTbchTnO9gG65Hg/uYGdc7mguHxoA=
 github.com/yannismate/pion-interceptor v0.1.38-0.20250607154533-480ce32c6efc h1:+E/9fbMKxXD/Maabxj+StGiP85RU7p3RLs8jpKI7qHU=
 github.com/yannismate/pion-interceptor v0.1.38-0.20250607154533-480ce32c6efc/go.mod h1:3IceU5uQaA0k7q76blAaw3HVw7n2Prq0WQRMNQJt9RY=
+github.com/yannismate/pion-interceptor v0.1.38-0.20250607160403-cb92d1ed9fa4 h1:oZ8IRy3UuKzpODdmSY1S6TnsYR96YTQ8pGkxt5dd7SE=
 github.com/yannismate/pion-interceptor v0.1.38-0.20250607160403-cb92d1ed9fa4/go.mod h1:3IceU5uQaA0k7q76blAaw3HVw7n2Prq0WQRMNQJt9RY=
 github.com/yannismate/pion-webrtc/v4 v4.0.0-20250607154802-f28561f574be h1:mV6jaNAWQPNnVbki13pX4vJMMnNeEm9eQFPhyGyWwl4=
 github.com/yannismate/pion-webrtc/v4 v4.0.0-20250607154802-f28561f574be/go.mod h1:+P9FWHHK1SW9OORYz5JT+HGlks9O+Gr4UUFyT067N34=
