@@ -29,6 +29,7 @@ type CaseVideoPion struct {
 	congestionControlType congestionControlType
 	targetBitrate         int
 	fecType               FECType
+	transceiver           *webrtc.RTPTransceiver
 
 	pendingCandidates []*webrtc.ICECandidate
 	candidatesMux     sync.Mutex
@@ -99,7 +100,7 @@ func (c *CaseVideoPion) Start() error {
 	}
 
 	videoRTCPFeedback := []webrtc.RTCPFeedback{{"goog-remb", ""}, {"ccm", "fir"}, {"nack", ""}, {"nack", "pli"}}
-	for _, codec := range []webrtc.RTPCodecParameters{
+	codecParams := []webrtc.RTPCodecParameters{
 		{
 			RTPCodecCapability: webrtc.RTPCodecCapability{
 				MimeType: webrtc.MimeTypeH264, ClockRate: 90000,
@@ -112,7 +113,8 @@ func (c *CaseVideoPion) Start() error {
 			RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeRTX, ClockRate: 90000, SDPFmtpLine: "apt=102"},
 			PayloadType:        103,
 		},
-	} {
+	}
+	for _, codec := range codecParams {
 		if err := mediaEngine.RegisterCodec(codec, webrtc.RTPCodecTypeVideo); err != nil {
 			return err
 		}
@@ -308,8 +310,13 @@ func (c *CaseVideoPion) Start() error {
 	})
 
 	if c.sendOffer {
+		transceiver, err := peerConnection.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly})
+		if err != nil {
+			return err
+		}
+		c.transceiver = transceiver
 
-		err = c.testSource.CreateTrack(peerConnection)
+		err = c.testSource.CreateTrack(transceiver)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to create RTP track")
 			return err
@@ -338,8 +345,15 @@ func (c *CaseVideoPion) Start() error {
 			log.Error().Err(err).Msg("Failed to send offer")
 			return err
 		}
+	} else {
+		transceiver, err := peerConnection.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly})
+		if err != nil {
+			return err
+		}
+		c.transceiver = transceiver
 	}
-	return nil
+
+	return c.transceiver.SetCodecPreferences(codecParams)
 }
 
 func (c *CaseVideoPion) OnReceiveSignal(signalType PeerSignalType, message []byte) error {

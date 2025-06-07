@@ -11,7 +11,7 @@ import (
 )
 
 type FakeRTPDataWriter interface {
-	CreateTrack(peerConnection *webrtc.PeerConnection) error
+	CreateTrack(transceiver *webrtc.RTPTransceiver) error
 	Start() (uint32, uint32)
 	SetBitrate(targetBitrate int)
 	Stop()
@@ -32,19 +32,18 @@ func NewFakeRTPDataWriter(targetBitrate int) FakeRTPDataWriter {
 	}
 }
 
-func (fw *fakeRTPDataWriter) CreateTrack(peerConnection *webrtc.PeerConnection) error {
+func (fw *fakeRTPDataWriter) CreateTrack(transceiver *webrtc.RTPTransceiver) error {
 	localSample, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264}, "video", "pion")
 	if err != nil {
 		return err
 	}
 
 	fw.track = localSample
-
-	rtpSender, err := peerConnection.AddTrack(localSample)
+	fw.rtpSender = transceiver.Sender()
+	err = fw.rtpSender.ReplaceTrack(localSample)
 	if err != nil {
 		return err
 	}
-	fw.rtpSender = rtpSender
 
 	codec, err := syncodec.NewStatisticalEncoder(fw, syncodec.WithInitialTargetBitrate(fw.InitialTargetBitrate))
 	if err != nil {
