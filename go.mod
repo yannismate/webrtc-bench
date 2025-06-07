@@ -47,3 +47,7 @@ require (
 	golang.org/x/net v0.41.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
 )
+
+replace github.com/pion/webrtc/v4 => github.com/yannismate/pion-webrtc/v4 v4.0.0-20250607154802-f28561f574be
+
+replace github.com/pion/interceptor => github.com/yannismate/pion-interceptor v0.1.38-0.20250607154533-480ce32c6efc
