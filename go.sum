@@ -89,6 +89,8 @@ github.com/yannismate/pion-interceptor v0.1.38-0.20250607154533-480ce32c6efc h1:
 github.com/yannismate/pion-interceptor v0.1.38-0.20250607154533-480ce32c6efc/go.mod h1:3IceU5uQaA0k7q76blAaw3HVw7n2Prq0WQRMNQJt9RY=
 github.com/yannismate/pion-interceptor v0.1.38-0.20250607160403-cb92d1ed9fa4 h1:oZ8IRy3UuKzpODdmSY1S6TnsYR96YTQ8pGkxt5dd7SE=
 github.com/yannismate/pion-interceptor v0.1.38-0.20250607160403-cb92d1ed9fa4/go.mod h1:3IceU5uQaA0k7q76blAaw3HVw7n2Prq0WQRMNQJt9RY=
+github.com/yannismate/pion-interceptor v0.1.38-0.20250607164013-18949c675c1c h1:3irICpCj2iQ5o6Bn5jbcpG7JI5bP8X7V5DuHB9EWP20=
+github.com/yannismate/pion-interceptor v0.1.38-0.20250607164013-18949c675c1c/go.mod h1:3IceU5uQaA0k7q76blAaw3HVw7n2Prq0WQRMNQJt9RY=
 github.com/yannismate/pion-webrtc/v4 v4.0.0-20250607154802-f28561f574be h1:mV6jaNAWQPNnVbki13pX4vJMMnNeEm9eQFPhyGyWwl4=
 github.com/yannismate/pion-webrtc/v4 v4.0.0-20250607154802-f28561f574be/go.mod h1:+P9FWHHK1SW9OORYz5JT+HGlks9O+Gr4UUFyT067N34=
 golang.org/x/crypto v0.39.0 h1:SHs+kF4LP+f+p14esP5jAoDpHU8Gu/v9lFRK6IT5imM=
