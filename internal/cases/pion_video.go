@@ -195,7 +195,7 @@ func (c *CaseVideoPion) Start() error {
 		case noCongestionControl:
 			log.Warn().Msg("Congestion control is set to none")
 		case gccCongestionControl:
-			bwe, err := gcc.NewSendSideBWE(gcc.SendSideBWEInitialBitrate(c.targetBitrate/2),
+			bwe, err := gcc.NewSendSideBWE(gcc.SendSideBWEInitialBitrate(1800000),
 				gcc.SendSideBWEMaxBitrate(c.targetBitrate*2))
 			if err != nil {
 				return err
@@ -214,7 +214,7 @@ func (c *CaseVideoPion) Start() error {
 			var bitrateUpdateNotifier = make(chan int)
 			senderInterceptor, err := scream.NewSenderInterceptor(
 				scream.MaxBitrate(float64(2*c.targetBitrate)),
-				scream.InitialBitrate(float64(c.targetBitrate/2)),
+				scream.InitialBitrate(float64(1800000)),
 				scream.TotalBitrateChangeNotifier(bitrateUpdateNotifier),
 				scream.OnSenderInterceptorCreated(c.statCollector.AddScreamSenderCollection))
 
