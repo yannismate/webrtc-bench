@@ -50,4 +50,4 @@ require (
 
 replace github.com/pion/webrtc/v4 => github.com/yannismate/pion-webrtc/v4 v4.0.0-20250607154802-f28561f574be
 
-replace github.com/pion/interceptor => github.com/yannismate/pion-interceptor v0.1.38-0.20250608175627-2696e95041ad
+replace github.com/pion/interceptor => github.com/yannismate/pion-interceptor v0.1.38-0.20250608214943-27e552b832ea
