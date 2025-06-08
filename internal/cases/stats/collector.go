@@ -173,6 +173,9 @@ func (sc *statCollector) StartCollection(streamID uint32, rtxID uint32) {
 					}
 				}
 
+				if inboundStats == nil && outboundStats == nil {
+					continue
+				}
 				sc.resultWriter.WriteRow(results.ResultRow{
 					Timestamp:   now,
 					InboundRTP:  inboundStats,
