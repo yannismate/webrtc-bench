@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/rs/zerolog/log"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -128,10 +127,7 @@ func (s *SenderInterceptor) BindRTCPReader(reader interceptor.RTCPReader) interc
 				ssrcs = extractSSRCs(*report)
 			case *rtcp.CCFeedbackReport:
 				ssrcs = extractSSRCsReport(report)
-			case *rtcp.TransportLayerNack:
-			case *rtcp.ReceiverReport:
 			default:
-				log.Info().Msgf("got incorrect packet type %v, skipping feedback", reflect.TypeOf(pkt).String())
 				continue
 			}
 
