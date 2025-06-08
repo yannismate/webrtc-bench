@@ -185,7 +185,12 @@ func (c *CaseVideoPion) Start() error {
 		}
 		icRegistry.Add(sr)
 
-		// 2. CC
+		// 2. NACK
+		if err := webrtc.ConfigureNack(&mediaEngine, &icRegistry); err != nil {
+			return err
+		}
+
+		// 3. CC
 		switch c.congestionControlType {
 		case noCongestionControl:
 			log.Warn().Msg("Congestion control is set to none")
@@ -228,13 +233,13 @@ func (c *CaseVideoPion) Start() error {
 			log.Fatal().Msgf("invalid congestion control type: %s", c.congestionControlType)
 		}
 
-		// 3. TWCC
+		// 4. TWCC
 		err = webrtc.ConfigureTWCCHeaderExtensionSender(&mediaEngine, &icRegistry)
 		if err != nil {
 			return err
 		}
 
-		// 4. FCC
+		// 5. FCC
 		if c.fecType == FECTypeFlexFEC {
 			flexFexInterceptor, err := flexfec.NewFecInterceptor()
 			if err != nil {
@@ -243,11 +248,6 @@ func (c *CaseVideoPion) Start() error {
 			icRegistry.Add(flexFexInterceptor)
 		} else if c.fecType != FECTypeDisabled {
 			log.Fatal().Msgf("Invalid FEC type for Pion: %s", c.fecType)
-		}
-
-		// 5. NACK
-		if err := webrtc.ConfigureNack(&mediaEngine, &icRegistry); err != nil {
-			return err
 		}
 
 		// 6. Stats
