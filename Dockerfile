@@ -22,11 +22,11 @@ RUN go build -o /go/bin/peer cmd/peer/peer.go
 FROM debian:12
 
 WORKDIR /root
+ADD testdata /root/testdata
 RUN apt update && apt install -y libglib2.0-0 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libxcomposite1 libxdamage1 libxfixes3 libnss3 libxrandr2 libgbm1 libxkbcommon0 libasound2
-COPY --from=build /go/bin /bin
 COPY --from=chrome-download /tmp/headless-shell /opt/headless-shell
 RUN ln -s /opt/headless-shell/chrome-headless-shell /opt/headless-shell/headless-shell
 ENV PATH="$PATH:/opt/headless-shell"
-ADD testdata /root/testdata
+COPY --from=build /go/bin /bin
 
 ENTRYPOINT ["/bin/peer"]
