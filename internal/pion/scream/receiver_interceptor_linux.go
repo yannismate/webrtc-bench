@@ -4,6 +4,7 @@
 package scream
 
 import (
+	"github.com/rs/zerolog/log"
 	"sync"
 	"time"
 
@@ -26,6 +27,7 @@ func (f *ReceiverInterceptorFactory) NewInterceptor(id string) (interceptor.Inte
 		interval: time.Millisecond * 10,
 		close:    make(chan struct{}),
 		log:      logging.NewDefaultLoggerFactory().NewLogger("scream_receiver"),
+		rtxSSRCs: make(map[uint32]uint32),
 		screamRx: map[uint32]*scream.Rx{},
 		receive:  make(chan *rtp.Packet),
 	}
@@ -50,6 +52,7 @@ type ReceiverInterceptor struct {
 	close chan struct{}
 	log   logging.LeveledLogger
 
+	rtxSSRCs   map[uint32]uint32
 	screamRx   map[uint32]*scream.Rx
 	screamRxMu sync.Mutex
 	interval   time.Duration
@@ -80,8 +83,15 @@ func (r *ReceiverInterceptor) BindRTCPWriter(writer interceptor.RTCPWriter) inte
 // BindRemoteStream lets you modify any incoming RTP packets. It is called once for per RemoteStream. The returned method
 // will be called once per rtp packet.
 func (r *ReceiverInterceptor) BindRemoteStream(info *interceptor.StreamInfo, reader interceptor.RTPReader) interceptor.RTPReader {
-	rx := scream.NewRx(info.SSRC)
 	r.screamRxMu.Lock()
+	if info.SSRCRetransmission != 0 {
+		r.rtxSSRCs[info.SSRCRetransmission] = info.SSRC
+	} else if mainSSRC, ok := r.rtxSSRCs[info.SSRC]; ok {
+		log.Info().Msgf("Ignoring SSRC %d in scream receiver because it's RTX for %d", info.SSRC, mainSSRC)
+		r.screamRxMu.Unlock()
+		return reader
+	}
+	rx := scream.NewRx(info.SSRC)
 	r.screamRx[info.SSRC] = rx
 	r.screamRxMu.Unlock()
 
