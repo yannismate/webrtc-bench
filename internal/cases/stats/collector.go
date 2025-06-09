@@ -160,14 +160,19 @@ func (sc *statCollector) StartCollection(streamID uint32, rtxID uint32) {
 
 					if _, ok := screamStatMap["targetBitrate"]; ok {
 						if _, castOk := screamStatMap["targetBitrate"].(string); castOk {
+							log.Info().Msgf("%+v", screamStatMap)
 							screamStats = &results.ScreamStats{
 								QueueDelay:       util.AssumeNoErr(strconv.ParseFloat(screamStatMap["queueDelay"].(string), 64)),
 								QueueDelayMax:    util.AssumeNoErr(strconv.ParseFloat(screamStatMap["queueDelayMax"].(string), 64)),
 								QueueDelayMinAvg: util.AssumeNoErr(strconv.ParseFloat(screamStatMap["queueDelayMinAvg"].(string), 64)),
+								SRTT:             util.AssumeNoErr(strconv.ParseFloat(screamStatMap["sRTT"].(string), 64)),
 								CWND:             uint32(util.AssumeNoErr(strconv.ParseUint(screamStatMap["cwnd"].(string), 10, 32))),
 								BytesInFlightLog: uint32(util.AssumeNoErr(strconv.ParseUint(screamStatMap["bytesInFlightLog"].(string), 10, 32))),
 								IsInFastStart:    screamStatMap["isInFastStart"].(string) == "1",
 								TargetBitrate:    uint32(util.AssumeNoErr(strconv.ParseUint(screamStatMap["targetBitrate"].(string), 10, 32))),
+								RateTransmitted:  uint32(util.AssumeNoErr(strconv.ParseUint(screamStatMap["rateTransmitted"].(string), 10, 32))),
+								RateAcked:        uint32(util.AssumeNoErr(strconv.ParseUint(screamStatMap["rateAcked"].(string), 10, 32))),
+								RateLost:         uint32(util.AssumeNoErr(strconv.ParseUint(screamStatMap["rateLost"].(string), 10, 32))),
 							}
 						}
 					}

@@ -59,9 +59,12 @@ type ScreamStats struct {
 	QueueDelay       float64
 	QueueDelayMax    float64
 	QueueDelayMinAvg float64
-	sRTT             float64
+	SRTT             float64
 	CWND             uint32
 	BytesInFlightLog uint32
 	IsInFastStart    bool
 	TargetBitrate    uint32
+	RateTransmitted  uint32
+	RateAcked        uint32
+	RateLost         uint32
 }
