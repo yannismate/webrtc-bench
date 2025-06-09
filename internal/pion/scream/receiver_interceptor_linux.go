@@ -143,7 +143,6 @@ func (r *ReceiverInterceptor) loop(rtcpWriter interceptor.RTCPWriter) {
 
 		r.screamRxMu.Lock()
 		if rx, ok := r.screamRx[pkt.SSRC]; ok {
-			//fmt.Printf("receive pkt %v at t=%v\n", pkt.SequenceNumber, t)
 			rx.Receive(t, pkt.SSRC, pkt.MarshalSize(), pkt.SequenceNumber, 0)
 		}
 		r.screamRxMu.Unlock()
@@ -158,7 +157,6 @@ func (r *ReceiverInterceptor) loop(rtcpWriter interceptor.RTCPWriter) {
 
 			r.screamRxMu.Lock()
 			if rx, ok := r.screamRx[pkt.SSRC]; ok {
-				//fmt.Printf("receive pkt %v at t=%v\n", pkt.SequenceNumber, t)
 				rx.Receive(t, pkt.SSRC, pkt.MarshalSize(), pkt.SequenceNumber, 0)
 			}
 			r.screamRxMu.Unlock()
@@ -168,9 +166,8 @@ func (r *ReceiverInterceptor) loop(rtcpWriter interceptor.RTCPWriter) {
 				r.screamRxMu.Lock()
 
 				for _, rx := range r.screamRx {
-					// TODO: Check meaning of isMark
 					t := r.getTimeNTP(time.Now())
-					if ok, feedback := rx.CreateStandardizedFeedback(t, true); ok {
+					if ok, feedback := rx.CreateStandardizedFeedback(t, false); ok {
 						//fmt.Printf("sent feedback at %v\n", t)
 						fb := rtcp.RawPacket(feedback)
 						if _, err := rtcpWriter.Write([]rtcp.Packet{&fb}, interceptor.Attributes{}); err != nil {
