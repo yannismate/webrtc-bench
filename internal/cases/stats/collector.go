@@ -160,7 +160,6 @@ func (sc *statCollector) StartCollection(streamID uint32, rtxID uint32) {
 
 					if _, ok := screamStatMap["targetBitrate"]; ok {
 						if _, castOk := screamStatMap["targetBitrate"].(string); castOk {
-							log.Info().Msgf("%+v", screamStatMap)
 							screamStats = &results.ScreamStats{
 								QueueDelay:       util.AssumeNoErr(strconv.ParseFloat(screamStatMap["queueDelay"].(string), 64)),
 								QueueDelayMax:    util.AssumeNoErr(strconv.ParseFloat(screamStatMap["queueDelayMax"].(string), 64)),
