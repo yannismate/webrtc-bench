@@ -4,7 +4,7 @@
 package scream
 
 import (
-	"github.com/rs/zerolog/log"
+	"encoding/binary"
 	"sync"
 	"time"
 
@@ -84,15 +84,18 @@ func (r *ReceiverInterceptor) BindRTCPWriter(writer interceptor.RTCPWriter) inte
 // will be called once per rtp packet.
 func (r *ReceiverInterceptor) BindRemoteStream(info *interceptor.StreamInfo, reader interceptor.RTPReader) interceptor.RTPReader {
 	r.screamRxMu.Lock()
+	var rx *scream.Rx
+	isRtx := false
+	var mainSSRC uint32
 	if info.SSRCRetransmission != 0 {
 		r.rtxSSRCs[info.SSRCRetransmission] = info.SSRC
-	} else if mainSSRC, ok := r.rtxSSRCs[info.SSRC]; ok {
-		log.Info().Msgf("Ignoring SSRC %d in scream receiver because it's RTX for %d", info.SSRC, mainSSRC)
-		r.screamRxMu.Unlock()
-		return reader
+		rx = scream.NewRx(info.SSRC)
+		r.screamRx[info.SSRC] = rx
+	} else if mSSRC, ok := r.rtxSSRCs[info.SSRC]; ok {
+		mainSSRC = mSSRC
+		rx = r.screamRx[mainSSRC]
+		isRtx = true
 	}
-	rx := scream.NewRx(info.SSRC)
-	r.screamRx[info.SSRC] = rx
 	r.screamRxMu.Unlock()
 
 	return interceptor.RTPReaderFunc(func(b []byte, a interceptor.Attributes) (int, interceptor.Attributes, error) {
@@ -100,11 +103,24 @@ func (r *ReceiverInterceptor) BindRemoteStream(info *interceptor.StreamInfo, rea
 		if err != nil {
 			return 0, nil, err
 		}
+
 		buf := make([]byte, i)
 		copy(buf, b)
+
 		pkt := rtp.Packet{}
 		if err = pkt.Unmarshal(buf); err != nil {
 			return 0, nil, err
+		}
+
+		if isRtx {
+			hasExtension := b[0]&0b10000 > 0
+			csrcCount := b[0] & 0b1111
+			headerLength := uint16(12 + (4 * csrcCount))
+			if hasExtension {
+				headerLength += 4 * (1 + binary.BigEndian.Uint16(b[headerLength+2:headerLength+4]))
+			}
+			pkt.SSRC = mainSSRC
+			pkt.SequenceNumber = binary.BigEndian.Uint16(b[headerLength : headerLength+2])
 		}
 
 		r.receive <- &pkt
