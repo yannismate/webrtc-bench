@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pion/interceptor/pkg/flexfec"
+	"github.com/pion/interceptor/pkg/nack"
 	"github.com/pion/interceptor/pkg/report"
 	"io"
 	"os"
@@ -128,9 +129,13 @@ func (c *CaseVideoPion) Start() error {
 		icRegistry.Add(c.statCollector.GetPionInterceptorFactory())
 
 		// 2. NACK
-		if err := webrtc.ConfigureNack(&mediaEngine, &icRegistry); err != nil {
+		generator, err := nack.NewGeneratorInterceptor(nack.GeneratorMaxNacksPerPacket(5))
+		if err != nil {
 			return err
 		}
+		mediaEngine.RegisterFeedback(webrtc.RTCPFeedback{Type: "nack"}, webrtc.RTPCodecTypeVideo)
+		mediaEngine.RegisterFeedback(webrtc.RTCPFeedback{Type: "nack", Parameter: "pli"}, webrtc.RTPCodecTypeVideo)
+		icRegistry.Add(generator)
 
 		// 3. RR
 		rr, err := report.NewReceiverInterceptor()
@@ -186,9 +191,14 @@ func (c *CaseVideoPion) Start() error {
 		icRegistry.Add(sr)
 
 		// 2. NACK
-		if err := webrtc.ConfigureNack(&mediaEngine, &icRegistry); err != nil {
+		responder, err := nack.NewResponderInterceptor()
+		if err != nil {
 			return err
 		}
+
+		mediaEngine.RegisterFeedback(webrtc.RTCPFeedback{Type: "nack"}, webrtc.RTPCodecTypeVideo)
+		mediaEngine.RegisterFeedback(webrtc.RTCPFeedback{Type: "nack", Parameter: "pli"}, webrtc.RTPCodecTypeVideo)
+		icRegistry.Add(responder)
 
 		// 3. CC
 		switch c.congestionControlType {
