@@ -27,9 +27,12 @@ def convert_parquet_to_csv(src: Path) -> Path:
     df = _flatten(df)
     df = df.dropna(axis=1, how='all')
 
+    # Filter rows with timestamps older than one year
+    one_year_ago = (pd.Timestamp.now(tz="UTC") - pd.DateOffset(years=1))
+    df = df[df["Timestamp"] >= one_year_ago]
+
     # Drop consecutive rows with the same timestamp, keeping only the first occurrence
-    if 'timestamp' in df.columns:
-        df = df.loc[df['timestamp'].shift() != df['timestamp']]
+    df = df.drop_duplicates(subset=['Timestamp'], keep='first')
 
     dest = src.with_suffix(".csv")
     df.to_csv(dest, index=False)

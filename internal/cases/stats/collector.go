@@ -129,7 +129,7 @@ func (sc *statCollector) StartCollection(streamID uint32, rtxID uint32) {
 				if recordedStats.OutboundRTPStreamStats.PacketsSent > 0 {
 					outboundStats = &results.ResultRowOutboundRTP{
 						PacketsSent:     recordedStats.OutboundRTPStreamStats.PacketsSent + rtxPacketsSent,
-						RoundTripTime:   float64(recordedStats.RemoteOutboundRTPStreamStats.RoundTripTime.Milliseconds()) / 1000.0,
+						RoundTripTime:   float64(recordedStats.RemoteInboundRTPStreamStats.RoundTripTime.Milliseconds()) / 1000.0,
 						BytesSent:       recordedStats.OutboundRTPStreamStats.BytesSent + rtxBytesSent,
 						HeaderBytesSent: recordedStats.OutboundRTPStreamStats.HeaderBytesSent,
 						NACKCount:       recordedStats.OutboundRTPStreamStats.NACKCount,

@@ -8,6 +8,7 @@ import (
 	"github.com/pion/interceptor/pkg/report"
 	"io"
 	"os"
+	"reflect"
 	"strconv"
 	"sync"
 	"time"
@@ -125,10 +126,7 @@ func (c *CaseVideoPion) Start() error {
 	if !c.sendOffer {
 		// Configure receiver interceptors in order
 
-		// 1. Stats
-		icRegistry.Add(c.statCollector.GetPionInterceptorFactory())
-
-		// 2. NACK
+		// 1. NACK
 		generator, err := nack.NewGeneratorInterceptor(nack.GeneratorMaxNacksPerPacket(5))
 		if err != nil {
 			return err
@@ -137,20 +135,20 @@ func (c *CaseVideoPion) Start() error {
 		mediaEngine.RegisterFeedback(webrtc.RTCPFeedback{Type: "nack", Parameter: "pli"}, webrtc.RTPCodecTypeVideo)
 		icRegistry.Add(generator)
 
-		// 3. RR
+		// 2. RR
 		rr, err := report.NewReceiverInterceptor()
 		if err != nil {
 			return err
 		}
 		icRegistry.Add(rr)
 
-		// 4. TWCC
+		// 3. TWCC
 		err = webrtc.ConfigureTWCCHeaderExtensionSender(&mediaEngine, &icRegistry)
 		if err != nil {
 			return err
 		}
 
-		// 5. CC
+		// 4. CC
 		switch c.congestionControlType {
 		case noCongestionControl:
 			log.Warn().Msg("Congestion control is set to none")
@@ -170,7 +168,7 @@ func (c *CaseVideoPion) Start() error {
 			log.Fatal().Msgf("invalid congestion control type: %s", c.congestionControlType)
 		}
 
-		// 6. FCC
+		// 5. FCC
 		if c.fecType == FECTypeFlexFEC {
 			flexFexInterceptor, err := flexfec.NewFecInterceptor()
 			if err != nil {
@@ -181,16 +179,22 @@ func (c *CaseVideoPion) Start() error {
 			log.Fatal().Msgf("Invalid FEC type for Pion: %s", c.fecType)
 		}
 
+		// 6. Stats
+		icRegistry.Add(c.statCollector.GetPionInterceptorFactory())
+
 	} else {
 		// Configure sender interceptors in order
-		// 1. SR
+		// 1. Stats
+		icRegistry.Add(c.statCollector.GetPionInterceptorFactory())
+
+		// 2. SR
 		sr, err := report.NewSenderInterceptor()
 		if err != nil {
 			return err
 		}
 		icRegistry.Add(sr)
 
-		// 2. NACK
+		// 3. NACK
 		responder, err := nack.NewResponderInterceptor()
 		if err != nil {
 			return err
@@ -200,7 +204,7 @@ func (c *CaseVideoPion) Start() error {
 		mediaEngine.RegisterFeedback(webrtc.RTCPFeedback{Type: "nack", Parameter: "pli"}, webrtc.RTPCodecTypeVideo)
 		icRegistry.Add(responder)
 
-		// 3. CC
+		// 4. CC
 		switch c.congestionControlType {
 		case noCongestionControl:
 			log.Warn().Msg("Congestion control is set to none")
@@ -243,13 +247,13 @@ func (c *CaseVideoPion) Start() error {
 			log.Fatal().Msgf("invalid congestion control type: %s", c.congestionControlType)
 		}
 
-		// 4. TWCC
+		// 5. TWCC
 		err = webrtc.ConfigureTWCCHeaderExtensionSender(&mediaEngine, &icRegistry)
 		if err != nil {
 			return err
 		}
 
-		// 5. FCC
+		// 6. FCC
 		if c.fecType == FECTypeFlexFEC {
 			flexFexInterceptor, err := flexfec.NewFecInterceptor()
 			if err != nil {
@@ -259,9 +263,6 @@ func (c *CaseVideoPion) Start() error {
 		} else if c.fecType != FECTypeDisabled {
 			log.Fatal().Msgf("Invalid FEC type for Pion: %s", c.fecType)
 		}
-
-		// 6. Stats
-		icRegistry.Add(c.statCollector.GetPionInterceptorFactory())
 	}
 
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(&mediaEngine), webrtc.WithInterceptorRegistry(&icRegistry), webrtc.WithSettingEngine(settings))
@@ -306,6 +307,21 @@ func (c *CaseVideoPion) Start() error {
 	peerConnection.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		log.Info().Msgf("Received Track on SSRC %v with RTX SSRC %v", remoteTrack.SSRC(), remoteTrack.RtxSSRC())
 		c.statCollector.StartCollection(uint32(remoteTrack.SSRC()), uint32(remoteTrack.RtxSSRC()))
+
+		go func() {
+			for {
+				pkts, _, readErr := receiver.ReadRTCP()
+				for _, pkt := range pkts {
+					log.Debug().Msgf("Received RTCP packet: %v", reflect.TypeOf(pkt))
+				}
+				if readErr != nil {
+					if readErr != io.EOF {
+						log.Error().Err(readErr).Msgf("Error reading from remote RTCP track")
+					}
+					break
+				}
+			}
+		}()
 
 		for {
 			// read and discard RTP stream

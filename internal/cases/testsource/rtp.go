@@ -6,6 +6,7 @@ import (
 	"github.com/pion/webrtc/v4/pkg/media"
 	"github.com/rs/zerolog/log"
 	"io"
+	"reflect"
 	"time"
 	"webrtc-bench/internal/cases/stats"
 )
@@ -61,7 +62,12 @@ func (fw *fakeRTPDataWriter) Start() (uint32, uint32) {
 
 	go func() {
 		for {
-			if _, _, err := fw.rtpSender.ReadRTCP(); err != nil {
+			pkts, _, err := fw.rtpSender.ReadRTCP()
+			for _, pkt := range pkts {
+				log.Debug().Msgf("Received RTCP packet: %v", reflect.TypeOf(pkt))
+			}
+
+			if err != nil {
 				if err == io.EOF {
 					log.Debug().Err(err).Msg("Fake rtpSender stopped")
 					return

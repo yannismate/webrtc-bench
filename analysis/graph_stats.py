@@ -39,8 +39,11 @@ df = table.to_pandas().rename(
     }
 )
 
-# Drop rows with duplicate timestamps
-df = df.loc[df["Timestamp"].shift() != df["Timestamp"]]
+# Filter rows with timestamps older than one year
+one_year_ago = (pd.Timestamp.now(tz="UTC") - pd.DateOffset(years=1))
+df = df[df["Timestamp"] >= one_year_ago]
+
+df = df.drop_duplicates(subset=['Timestamp'], keep='first')
 
 if "PacketsReceived" not in df or df["PacketsReceived"].isna().all() or (df["PacketsReceived"] == 0).all():
     graph_packet_loss = False
