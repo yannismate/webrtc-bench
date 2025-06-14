@@ -7,6 +7,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
+	"strconv"
+	"strings"
 	"time"
 	"webrtc-bench/internal/cases"
 	"webrtc-bench/internal/cases/stats"
@@ -27,6 +30,7 @@ type client struct {
 	SendChan          chan []byte
 
 	CurrentCase         cases.PeerCaseExecutor
+	CurrentCaseConfig   cases.PeerCaseConfig
 	CurrentResultWriter results.ParquetResultsWriter
 	CurrentCaseMetadata util.TestMetadata
 }
@@ -128,6 +132,31 @@ func (c *client) Start() {
 					log.Error().Msg("Cannot start execution, no case configured!")
 					continue
 				}
+				if c.CurrentCaseConfig.ConfigurationCommands != nil {
+					go func() {
+						cmdSecTicker := time.NewTicker(time.Second)
+						secondsPassed := 0
+						currentCaseStarted := c.CurrentCaseMetadata.TimeStarted
+
+						for {
+							select {
+							case <-cmdSecTicker.C:
+								secondsPassed++
+
+								if c.CurrentCase == nil || c.CurrentCaseMetadata.TimeStarted != currentCaseStarted {
+									return
+								}
+
+								if cmds, ok := (*c.CurrentCaseConfig.ConfigurationCommands)["t"+strconv.Itoa(secondsPassed)]; ok {
+									for _, cmd := range cmds {
+										executeCommand(cmd)
+									}
+								}
+							}
+						}
+					}()
+				}
+
 				err := c.CurrentCase.Start()
 				c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateTesting})
 				log.Info().Msg("Case execution started")
@@ -144,6 +173,14 @@ func (c *client) Start() {
 				c.CurrentCase.Stop()
 				c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateTestEnding})
 				log.Info().Msg("Case execution stopped")
+
+				if c.CurrentCaseConfig.ConfigurationCommands != nil {
+					if cmds, ok := (*c.CurrentCaseConfig.ConfigurationCommands)["post"]; ok {
+						for _, cmd := range cmds {
+							executeCommand(cmd)
+						}
+					}
+				}
 
 				if c.CurrentResultWriter != nil {
 					file, err := c.CurrentResultWriter.GetResultFile()
@@ -212,6 +249,7 @@ func (c *client) SendMessage(msgType MessageType, content interface{}) {
 }
 
 func (c *client) configureCase(configMsg MessageConfigureClient) {
+	c.CurrentCaseConfig = configMsg.Config
 	if configMsg.Config.Implementation == cases.PeerImplementationPion {
 		c.CurrentCaseMetadata = util.GetPionTestMetadata()
 		switch configMsg.CaseType {
@@ -244,6 +282,14 @@ func (c *client) configureCase(configMsg MessageConfigureClient) {
 	statCollector := stats.NewStatCollector(resultWriter)
 	statCollector.SetInterval(time.Duration(configMsg.Config.StatInterval))
 
+	if configMsg.Config.ConfigurationCommands != nil {
+		if cmds, ok := (*configMsg.Config.ConfigurationCommands)["pre"]; ok {
+			for _, cmd := range cmds {
+				executeCommand(cmd)
+			}
+		}
+	}
+
 	err = c.CurrentCase.Configure(configMsg.Config, func(signalType cases.PeerSignalType, data []byte) error {
 		log.Debug().Msgf("OnSendSignal: [%s] %s", signalType, data)
 		c.SendMessage(MessageTypePeerSignal, MessagePeerSignal{SignalType: signalType, Data: data})
@@ -254,4 +300,21 @@ func (c *client) configureCase(configMsg MessageConfigureClient) {
 		return
 	}
 	log.Info().Msgf("Successfully configured case %s", configMsg.CaseType)
+}
+
+func executeCommand(cmd string) {
+	ignoreErr := strings.HasPrefix(cmd, "!")
+	cmd = strings.TrimPrefix(cmd, "!")
+	cmdParts := strings.Split(cmd, " ")
+	goCmd := exec.Command(cmdParts[0], cmdParts[1:]...)
+	err := goCmd.Run()
+	if err != nil {
+		if ignoreErr {
+			log.Info().Err(err).Msgf("Executed command %s, ignoring error.", cmd)
+			return
+		}
+		log.Fatal().Err(err).Str("command", goCmd.String()).Msg("Error executing command")
+		return
+	}
+	log.Info().Msgf("Executed command: %s", cmd)
 }

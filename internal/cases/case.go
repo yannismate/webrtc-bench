@@ -34,11 +34,12 @@ const (
 )
 
 type PeerCaseConfig struct {
-	Implementation   PeerImplementation
-	ICEServers       []string
-	SendOffer        bool
-	StatInterval     util.JSONDuration
-	AdditionalConfig map[string]string
+	Implementation        PeerImplementation
+	ICEServers            []string
+	SendOffer             bool
+	StatInterval          util.JSONDuration
+	AdditionalConfig      map[string]string
+	ConfigurationCommands *map[string][]string
 }
 
 type PeerSignalType string
