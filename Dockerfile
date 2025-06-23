@@ -28,5 +28,6 @@ COPY --from=chrome-download /tmp/headless-shell /opt/headless-shell
 RUN ln -s /opt/headless-shell/chrome-headless-shell /opt/headless-shell/headless-shell
 ENV PATH="$PATH:/opt/headless-shell"
 COPY --from=build /go/bin /bin
+ADD bin /root/bin
 
 ENTRYPOINT ["/bin/peer"]

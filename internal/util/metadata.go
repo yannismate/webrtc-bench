@@ -70,3 +70,14 @@ func GetChromeTestMetadata() TestMetadata {
 		Host:                  hostName,
 	}
 }
+
+func GetLibWebRTCTestMetadata() TestMetadata {
+	hostName, _ := os.Hostname()
+
+	return TestMetadata{
+		ImplementationType:    "libwebrtc",
+		ImplementationVersion: "TODO",
+		TimeStarted:           time.Now(),
+		Host:                  hostName,
+	}
+}

@@ -270,6 +270,16 @@ func (c *client) configureCase(configMsg MessageConfigureClient) {
 		default:
 			log.Fatal().Msgf("Unrecognized caseType: %s", configMsg.CaseType)
 		}
+	} else if configMsg.Config.Implementation == cases.PeerImplementationLibWebRTC {
+		c.CurrentCaseMetadata = util.GetLibWebRTCTestMetadata()
+		switch configMsg.CaseType {
+		case cases.CaseTypeVideo:
+			c.CurrentCase = &cases.CaseVideoLibWebRTC{}
+		default:
+			log.Fatal().Msgf("Unrecognized caseType: %s", configMsg.CaseType)
+		}
+	} else {
+		log.Fatal().Msgf("Unrecognized implementation type: %s", configMsg.CaseType)
 	}
 
 	resultWriter, err := results.NewParquetResultsWriter()

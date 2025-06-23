@@ -29,8 +29,9 @@ type PeerCaseExecutor interface {
 type PeerImplementation string
 
 const (
-	PeerImplementationPion   PeerImplementation = "pion"
-	PeerImplementationChrome PeerImplementation = "chrome"
+	PeerImplementationPion      PeerImplementation = "pion"
+	PeerImplementationChrome    PeerImplementation = "chrome"
+	PeerImplementationLibWebRTC PeerImplementation = "libwebrtc"
 )
 
 type PeerCaseConfig struct {
