@@ -18,6 +18,7 @@ type CaseVideoLibWebRTC struct {
 	process       *exec.Cmd
 	stdinWriter   *bufio.Writer
 	stdoutReader  *bufio.Scanner
+	stderrReader  *bufio.Scanner
 	processMutex  sync.Mutex
 }
 
@@ -53,6 +54,12 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 	}
 	c.stdoutReader = bufio.NewScanner(stdout)
 
+	stderr, err := c.process.StderrPipe()
+	if err != nil {
+		return err
+	}
+	c.stderrReader = bufio.NewScanner(stderr)
+
 	if err := c.process.Start(); err != nil {
 		return err
 	}
@@ -68,6 +75,17 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 				}
 			}
 			log.Debug().Msgf("[libwebrtc] %s", line)
+		}
+		err := c.process.Wait()
+		if err != nil {
+			log.Fatal().Msgf("Process exited with error: %s", err)
+		}
+	}()
+
+	go func() {
+		for c.stderrReader.Scan() {
+			line := c.stderrReader.Text()
+			log.Warn().Msgf("[libwebrtc] stderr: %s", line)
 		}
 	}()
 
