@@ -50,7 +50,7 @@ type GCCStats struct {
 	DelayTargetBitrate uint32
 	DelayMeasurement   float64
 	DelayEstimate      float64
-	DelayThreashold    float64
+	DelayThreshold     float64
 	Usage              string
 	State              string
 }

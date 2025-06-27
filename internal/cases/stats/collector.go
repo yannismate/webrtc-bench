@@ -149,7 +149,7 @@ func (sc *statCollector) StartCollection(streamID uint32, rtxID uint32) {
 						DelayTargetBitrate: uint32(gccStatMap["delayTargetBitrate"].(int)),
 						DelayMeasurement:   gccStatMap["delayMeasurement"].(float64),
 						DelayEstimate:      gccStatMap["delayEstimate"].(float64),
-						DelayThreashold:    gccStatMap["delayThreshold"].(float64),
+						DelayThreshold:     gccStatMap["delayThreshold"].(float64),
 						Usage:              gccStatMap["usage"].(string),
 						State:              gccStatMap["state"].(string),
 					}
