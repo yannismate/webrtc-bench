@@ -183,6 +183,7 @@ func (c *client) Start() {
 				}
 
 				if c.CurrentResultWriter != nil {
+					c.CurrentResultWriter.Close()
 					file, err := c.CurrentResultWriter.GetResultFile()
 					if err != nil {
 						log.Fatal().Err(err).Msg("Error getting result file")
