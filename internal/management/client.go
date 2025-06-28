@@ -1,6 +1,7 @@
 package management
 
 import (
+	"bufio"
 	"encoding/json"
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
@@ -315,9 +316,30 @@ func (c *client) configureCase(configMsg MessageConfigureClient) {
 
 func executeCommand(cmd string) {
 	ignoreErr := strings.HasPrefix(cmd, "!")
+	runAsync := strings.HasPrefix(cmd, "~")
 	cmd = strings.TrimPrefix(cmd, "!")
+	cmd = strings.TrimPrefix(cmd, "~")
 	cmdParts := strings.Split(cmd, " ")
 	goCmd := exec.Command(cmdParts[0], cmdParts[1:]...)
+	if runAsync {
+		stdout, err := goCmd.StdoutPipe()
+		if err != nil {
+			log.Fatal().Err(err).Str("command", goCmd.String()).Msg("Error getting command stdout")
+			return
+		}
+		stdoutReader := bufio.NewScanner(stdout)
+		go func() {
+			for stdoutReader.Scan() {
+				log.Debug().Msgf("Command stdout: %s", stdoutReader.Text())
+			}
+		}()
+		err = goCmd.Start()
+		if err != nil {
+			log.Fatal().Err(err).Str("command", goCmd.String()).Msg("Error executing command")
+			return
+		}
+		return
+	}
 	err := goCmd.Run()
 	if err != nil {
 		if ignoreErr {
