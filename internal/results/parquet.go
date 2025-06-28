@@ -70,6 +70,9 @@ func (w *parquetResultsWriter) WriteRow(row ResultRow) {
 }
 
 func (w *parquetResultsWriter) Close() {
+	if w.isClosed {
+		return
+	}
 	w.isClosed = true
 	close(w.writeRow)
 	w.writerFinished.Wait()
