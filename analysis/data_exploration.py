@@ -3,6 +3,8 @@ import pandas as pd
 import pyarrow.parquet as pq
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import plotly.express as px
+import plotly.figure_factory as ff
 import argparse
 
 parser = argparse.ArgumentParser(description="Analyze and graph WebRTC stats from a results folder.")
@@ -29,6 +31,12 @@ def load_parquet(parquet_file_path):
     one_year_ago = (pd.Timestamp.now(tz="UTC") - pd.DateOffset(years=1))
     df = df[df["Timestamp"] >= one_year_ago]
 
+    # Drop rows at the beginning with 0 packets sent/received
+    if "OutboundRTP.PacketsSent" in df.columns:
+        df = df.loc[df["OutboundRTP.PacketsSent"].ne(0).cummax()]
+    if "InboundRTP.PacketsReceived" in df.columns:
+        df = df.loc[df["InboundRTP.PacketsReceived"].ne(0).cummax()]
+
     # Remove duplicate stat rows with same timestamp
     df.drop_duplicates(subset=['Timestamp'], keep='first', inplace=True)
     df.set_index("Timestamp", inplace=True)
@@ -44,15 +52,16 @@ has_scream_stats = 'ScreamStats.TargetBitrate' in sender_df
 num_rows = 3
 specs = [[{"type": "scatter"}], [{"type": "scatter"}], [{"type": "scatter"}]]
 if has_gcc_stats:
-    num_rows = 5
+    num_rows = 6
     specs.append([{"type": "scatter"}])
     specs.append([{"type": "scatter"}])
+    specs.append([{"type": "gantt"}])
 if has_scream_stats:
     num_rows = 5
     specs.append([{"type": "scatter"}])
     specs.append([{"type": "scatter"}])
 
-fig = make_subplots(rows=num_rows, cols=1, shared_xaxes=True, vertical_spacing=0.03,specs=specs)
+fig = make_subplots(rows=num_rows, cols=1, shared_xaxes=True, vertical_spacing=0.03)
 
 fig.update_layout(title_text="WebRTC stats " + results_folder_path)
 
@@ -173,6 +182,49 @@ if 'GCCStats.State' in sender_df:
         row=5,
         col=1,
     )
+
+    # prepare color maps
+    usage_states = sender_df["GCCStats.Usage"].dropna().unique()
+    usage_colors = px.colors.qualitative.Plotly
+    usage_color_map = {s: usage_colors[i % len(usage_colors)] for i, s in enumerate(usage_states)}
+    state_states = sender_df["GCCStats.State"].dropna().unique()
+    state_colors = px.colors.qualitative.Pastel
+    state_color_map = {s: state_colors[i % len(state_colors)] for i, s in enumerate(state_states)}
+
+    # build Gantt for GCCStats.Usage
+    usage = sender_df["GCCStats.Usage"]
+    df_usage_segments = []
+    curr_state, curr_start = None, None
+    for t, s in usage.items():
+        if pd.isna(s): continue
+        if s != curr_state:
+            if curr_state is not None:
+                df_usage_segments.append(dict(Task="Usage", Start=curr_start, Finish=t, Resource=curr_state))
+            curr_state, curr_start = s, t
+    if curr_state is not None:
+        df_usage_segments.append(dict(Task="Usage", Start=curr_start, Finish=usage.index[-1], Resource=curr_state))
+
+    # build Gantt for GCCStats.State
+    state = sender_df["GCCStats.State"]
+    df_state_segments = []
+    curr_state, curr_start = None, None
+    for t, s in state.items():
+        if pd.isna(s): continue
+        if s != curr_state:
+            if curr_state is not None:
+                df_state_segments.append(dict(Task="State", Start=curr_start, Finish=t, Resource=curr_state))
+            curr_state, curr_start = s, t
+    if curr_state is not None:
+        df_state_segments.append(dict(Task="State", Start=curr_start, Finish=state.index[-1], Resource=curr_state))
+
+    usage_gantt = ff.create_gantt(
+        df_usage_segments + df_state_segments,
+        group_tasks=True,
+        colors=usage_color_map | state_color_map,
+        index_col='Resource',
+    )
+    for trace in usage_gantt.data:
+        fig.add_trace(trace, row=6, col=1)
 
 # SCReAM Stats
 if has_scream_stats:
