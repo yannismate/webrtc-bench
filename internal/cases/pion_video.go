@@ -327,7 +327,7 @@ func (c *CaseVideoPion) Start() error {
 			for {
 				pkts, _, readErr := receiver.ReadRTCP()
 				for _, pkt := range pkts {
-					log.Debug().Msgf("Received RTCP packet: %v", reflect.TypeOf(pkt))
+					log.Trace().Msgf("Received RTCP packet: %v", reflect.TypeOf(pkt))
 				}
 				if readErr != nil {
 					if readErr != io.EOF {
@@ -407,6 +407,7 @@ func (c *CaseVideoPion) GetExtraResultFiles() *map[string][]byte {
 			continue
 		}
 		extraResultFiles[filepath.Base(file.Name())] = fileData
+		log.Info().Msgf("Sending extra result files: %v", file.Name())
 	}
 	return &extraResultFiles
 }

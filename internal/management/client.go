@@ -197,8 +197,9 @@ func (c *client) Start() {
 					}
 
 					c.SendMessage(MessageTypeResults, MessageResults{
-						Metadata: c.CurrentCaseMetadata,
-						FileData: fileData,
+						Metadata:        c.CurrentCaseMetadata,
+						FileData:        fileData,
+						AdditionalFiles: c.CurrentCase.GetExtraResultFiles(),
 					})
 				}
 

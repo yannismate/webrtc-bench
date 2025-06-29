@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -29,8 +30,9 @@ type server struct {
 	Clients                   map[string]wsClient
 	ClientStateUpdateListener func(string, ClientState)
 
-	shuttingDown      bool
-	currentResultPath string
+	shuttingDown       bool
+	currentResultPath  string
+	writeResultsWaiter sync.WaitGroup
 }
 
 type wsClient struct {
@@ -93,6 +95,7 @@ func (s *server) getPeerByName(name string) (wsClient, bool) {
 
 func (s *server) SetShuttingDown() {
 	s.shuttingDown = true
+	s.writeResultsWaiter.Wait()
 }
 
 func (s *server) SendMessage(clientName string, msgType MessageType, content interface{}) error {
@@ -251,6 +254,7 @@ func (s *server) handleWs(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			case MessageTypeResults:
+				s.writeResultsWaiter.Add(1)
 				innerMsg := MessageResults{}
 				err := json.Unmarshal(outerMsg.Data, &innerMsg)
 				if err != nil {
@@ -260,11 +264,12 @@ func (s *server) handleWs(w http.ResponseWriter, r *http.Request) {
 				}
 
 				client := s.Clients[clientId]
-				resultFilePath := path.Join(s.currentResultPath, *client.RegisteredAsClient+".parquet")
-				metadataFilePath := path.Join(s.currentResultPath, *client.RegisteredAsClient+"_meta.json")
 				cResultPath := s.currentResultPath
+				resultFilePath := path.Join(cResultPath, *client.RegisteredAsClient+".parquet")
+				metadataFilePath := path.Join(cResultPath, *client.RegisteredAsClient+"_meta.json")
 
 				go func() {
+					defer s.writeResultsWaiter.Done()
 					resultsFile, err := os.Create(resultFilePath)
 					if err != nil {
 						log.Error().Err(err).Msgf("Could not open result file at %s", resultFilePath)
@@ -299,6 +304,7 @@ func (s *server) handleWs(w http.ResponseWriter, r *http.Request) {
 
 					if innerMsg.AdditionalFiles != nil {
 						for name, data := range *innerMsg.AdditionalFiles {
+							log.Debug().Msgf("Received extra result files %v with size %d", name, len(data))
 							extraFile, err := os.Create(path.Join(cResultPath, name))
 							if err != nil {
 								log.Error().Err(err).Msgf("Could not create extra file at %s", path.Join(cResultPath, name))

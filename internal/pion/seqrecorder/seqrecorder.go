@@ -43,8 +43,12 @@ func (s *seqRecorder) BindRTCPWriter(writer interceptor.RTCPWriter) interceptor.
 }
 
 func (s *seqRecorder) BindLocalStream(info *interceptor.StreamInfo, writer interceptor.RTPWriter) interceptor.RTPWriter {
+	if info.SSRCRetransmission == 0 {
+		log.Info().Msgf("Not recording timings for SSRC %d - likely RTX.", info.SSRC)
+		return writer
+	}
 	ssrc := info.SSRC
-	tempFile, err := os.CreateTemp("", "timing-out-"+strconv.Itoa(int(ssrc))+".csv")
+	tempFile, err := os.CreateTemp("", "timing-in-"+strconv.Itoa(int(ssrc))+"-*.csv")
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to create temp file for timing logs")
 	}
@@ -74,8 +78,12 @@ func (s *seqRecorder) UnbindLocalStream(info *interceptor.StreamInfo) {
 }
 
 func (s *seqRecorder) BindRemoteStream(info *interceptor.StreamInfo, reader interceptor.RTPReader) interceptor.RTPReader {
+	if info.SSRCRetransmission == 0 {
+		log.Info().Msgf("Not recording timings for SSRC %d - likely RTX.", info.SSRC)
+		return reader
+	}
 	ssrc := info.SSRC
-	tempFile, err := os.CreateTemp("", "timing-in-"+strconv.Itoa(int(ssrc))+".csv")
+	tempFile, err := os.CreateTemp("", "timing-in-"+strconv.Itoa(int(ssrc))+"-*.csv")
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to create temp file for timing logs")
 	}
@@ -84,9 +92,14 @@ func (s *seqRecorder) BindRemoteStream(info *interceptor.StreamInfo, reader inte
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to write timing log header")
 	}
+	log.Info().Msgf("Saving timings for SSRC %d to %s", ssrc, tempFile.Name())
 
 	return interceptor.RTPReaderFunc(
 		func(buf []byte, attr interceptor.Attributes) (int, interceptor.Attributes, error) {
+			n, attr, err := reader.Read(buf, attr)
+			if err != nil {
+				return 0, nil, err
+			}
 			header, err := attr.GetRTPHeader(buf)
 			if err != nil {
 				log.Error().Err(err).Msg("Failed to get RTP Header")
@@ -97,7 +110,7 @@ func (s *seqRecorder) BindRemoteStream(info *interceptor.StreamInfo, reader inte
 			if err != nil {
 				log.Error().Err(err).Msg("Failed to write timing log header")
 			}
-			return reader.Read(buf, attr)
+			return n, attr, err
 		},
 	)
 }

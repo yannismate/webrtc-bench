@@ -64,7 +64,7 @@ func (fw *fakeRTPDataWriter) Start() (uint32, uint32) {
 		for {
 			pkts, _, err := fw.rtpSender.ReadRTCP()
 			for _, pkt := range pkts {
-				log.Debug().Msgf("Received RTCP packet: %v", reflect.TypeOf(pkt))
+				log.Trace().Msgf("Received RTCP packet: %v", reflect.TypeOf(pkt))
 			}
 
 			if err != nil {
