@@ -23,6 +23,7 @@ type PeerCaseExecutor interface {
 	Configure(config PeerCaseConfig, sendSignal func(signalType PeerSignalType, data []byte) error, statCollector stats.StatCollector) error
 	Start() error
 	OnReceiveSignal(signalType PeerSignalType, message []byte) error
+	GetExtraResultFiles() *map[string][]byte
 	Stop()
 }
 
@@ -38,6 +39,7 @@ type PeerCaseConfig struct {
 	Implementation        PeerImplementation
 	ICEServers            []string
 	SendOffer             bool
+	RecordTimings         *bool
 	StatInterval          util.JSONDuration
 	AdditionalConfig      map[string]string
 	ConfigurationCommands *map[string][]string

@@ -177,6 +177,10 @@ func (c *CaseVideoChrome) OnReceiveSignal(signalType PeerSignalType, message []b
 	return nil
 }
 
+func (c *CaseVideoChrome) GetExtraResultFiles() *map[string][]byte {
+	return nil
+}
+
 func (c *CaseVideoChrome) Stop() {
 	var res []string
 	err := chromedp.Run(c.browserContext,

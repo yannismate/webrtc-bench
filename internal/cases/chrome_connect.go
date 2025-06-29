@@ -109,6 +109,10 @@ func (c *CaseConnectChrome) OnReceiveSignal(signalType PeerSignalType, message [
 	return nil
 }
 
+func (c *CaseConnectChrome) GetExtraResultFiles() *map[string][]byte {
+	return nil
+}
+
 func (c *CaseConnectChrome) Stop() {
 	var res []string
 	err := chromedp.Run(c.browserContext,

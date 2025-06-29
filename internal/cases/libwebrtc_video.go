@@ -303,6 +303,10 @@ func convertSignalToGCCStats(signal gccStatsSignal) results.GCCStats {
 	}
 }
 
+func (c *CaseVideoLibWebRTC) GetExtraResultFiles() *map[string][]byte {
+	return nil
+}
+
 func convertSignalsToStatLine(inboundRTP *signalInboundRTP, outboundRTP *signalOutboundRTP,
 	remoteInboundRTP *signalRemoteInboundRTP, _ *signalRemoteOutboundRTP, gccStats *results.GCCStats) results.ResultRow {
 

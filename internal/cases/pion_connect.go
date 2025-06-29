@@ -178,6 +178,10 @@ func (c *CaseConnectPion) OnReceiveSignal(signalType PeerSignalType, message []b
 	return errors.New("unrecognized signalType")
 }
 
+func (c *CaseConnectPion) GetExtraResultFiles() *map[string][]byte {
+	return nil
+}
+
 func (c *CaseConnectPion) sendCandidate(cand *webrtc.ICECandidate) error {
 	payload, err := json.Marshal(cand.ToJSON())
 	if err != nil {

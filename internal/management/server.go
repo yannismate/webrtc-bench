@@ -262,6 +262,7 @@ func (s *server) handleWs(w http.ResponseWriter, r *http.Request) {
 				client := s.Clients[clientId]
 				resultFilePath := path.Join(s.currentResultPath, *client.RegisteredAsClient+".parquet")
 				metadataFilePath := path.Join(s.currentResultPath, *client.RegisteredAsClient+"_meta.json")
+				cResultPath := s.currentResultPath
 
 				go func() {
 					resultsFile, err := os.Create(resultFilePath)
@@ -294,6 +295,21 @@ func (s *server) handleWs(w http.ResponseWriter, r *http.Request) {
 					if err != nil {
 						log.Error().Err(err).Msgf("Could not write to metadata file")
 						return
+					}
+
+					if innerMsg.AdditionalFiles != nil {
+						for name, data := range *innerMsg.AdditionalFiles {
+							extraFile, err := os.Create(path.Join(cResultPath, name))
+							if err != nil {
+								log.Error().Err(err).Msgf("Could not create extra file at %s", path.Join(cResultPath, name))
+								continue
+							}
+							_, err = extraFile.Write(data)
+							if err != nil {
+								log.Error().Err(err).Msgf("Could not write data to extra file at %s", path.Join(cResultPath, name))
+							}
+							_ = extraFile.Close()
+						}
 					}
 				}()
 			}

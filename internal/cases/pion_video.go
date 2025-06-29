@@ -8,6 +8,7 @@ import (
 	"github.com/pion/interceptor/pkg/report"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"webrtc-bench/internal/cases/stats"
 	"webrtc-bench/internal/cases/testsource"
 	"webrtc-bench/internal/pion/scream"
+	"webrtc-bench/internal/pion/seqrecorder"
 
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/cc"
@@ -32,12 +34,14 @@ type CaseVideoPion struct {
 	targetBitrate         int
 	fecType               FECType
 	transceiver           *webrtc.RTPTransceiver
+	recordTimings         bool
 
-	pendingCandidates []*webrtc.ICECandidate
-	candidatesMux     sync.Mutex
-	statCollector     stats.StatCollector
-	statInterval      time.Duration
-	testSource        testsource.FakeRTPDataWriter
+	pendingCandidates  []*webrtc.ICECandidate
+	candidatesMux      sync.Mutex
+	statCollector      stats.StatCollector
+	statInterval       time.Duration
+	testSource         testsource.FakeRTPDataWriter
+	seqRecorderFactory *seqrecorder.Factory
 }
 
 type congestionControlType string
@@ -59,6 +63,8 @@ func (c *CaseVideoPion) Configure(config PeerCaseConfig, sendSignal func(signalT
 	}
 	c.sendOffer = config.SendOffer
 	c.statCollector = statCollector
+	c.recordTimings = config.RecordTimings != nil && *config.RecordTimings
+	c.seqRecorderFactory = &seqrecorder.Factory{}
 
 	bitrateStr, ok := config.AdditionalConfig["bitrate"]
 	if !ok {
@@ -182,19 +188,28 @@ func (c *CaseVideoPion) Start() error {
 		// 6. Stats
 		icRegistry.Add(c.statCollector.GetPionInterceptorFactory())
 
+		// 7. Timings
+		if c.recordTimings {
+			icRegistry.Add(c.seqRecorderFactory)
+		}
 	} else {
 		// Configure sender interceptors in order
-		// 1. Stats
+		// 1. Timings
+		if c.recordTimings {
+			icRegistry.Add(c.seqRecorderFactory)
+		}
+
+		// 2. Stats
 		icRegistry.Add(c.statCollector.GetPionInterceptorFactory())
 
-		// 2. SR
+		// 3. SR
 		sr, err := report.NewSenderInterceptor()
 		if err != nil {
 			return err
 		}
 		icRegistry.Add(sr)
 
-		// 3. NACK
+		// 4. NACK
 		responder, err := nack.NewResponderInterceptor()
 		if err != nil {
 			return err
@@ -204,7 +219,7 @@ func (c *CaseVideoPion) Start() error {
 		mediaEngine.RegisterFeedback(webrtc.RTCPFeedback{Type: "nack", Parameter: "pli"}, webrtc.RTPCodecTypeVideo)
 		icRegistry.Add(responder)
 
-		// 4. CC
+		// 5. CC
 		switch c.congestionControlType {
 		case noCongestionControl:
 			log.Warn().Msg("Congestion control is set to none")
@@ -247,13 +262,13 @@ func (c *CaseVideoPion) Start() error {
 			log.Fatal().Msgf("invalid congestion control type: %s", c.congestionControlType)
 		}
 
-		// 5. TWCC
+		// 6. TWCC
 		err = webrtc.ConfigureTWCCHeaderExtensionSender(&mediaEngine, &icRegistry)
 		if err != nil {
 			return err
 		}
 
-		// 6. FCC
+		// 7. FCC
 		if c.fecType == FECTypeFlexFEC {
 			flexFexInterceptor, err := flexfec.NewFecInterceptor()
 			if err != nil {
@@ -381,6 +396,19 @@ func (c *CaseVideoPion) Start() error {
 	}
 
 	return c.transceiver.SetCodecPreferences(codecParams)
+}
+
+func (c *CaseVideoPion) GetExtraResultFiles() *map[string][]byte {
+	extraResultFiles := make(map[string][]byte)
+	for _, file := range c.seqRecorderFactory.GetFiles() {
+		fileData, err := os.ReadFile(file.Name())
+		if err != nil {
+			log.Error().Err(err).Msgf("Failed to read file")
+			continue
+		}
+		extraResultFiles[filepath.Base(file.Name())] = fileData
+	}
+	return &extraResultFiles
 }
 
 func (c *CaseVideoPion) OnReceiveSignal(signalType PeerSignalType, message []byte) error {

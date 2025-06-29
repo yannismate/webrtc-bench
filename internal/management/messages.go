@@ -60,6 +60,7 @@ type MessagePeerSignal struct {
 }
 
 type MessageResults struct {
-	Metadata util.TestMetadata
-	FileData []byte
+	Metadata        util.TestMetadata
+	FileData        []byte
+	AdditionalFiles *map[string][]byte
 }
