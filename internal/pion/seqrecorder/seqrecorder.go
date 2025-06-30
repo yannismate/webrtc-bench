@@ -48,7 +48,7 @@ func (s *seqRecorder) BindLocalStream(info *interceptor.StreamInfo, writer inter
 		return writer
 	}
 	ssrc := info.SSRC
-	tempFile, err := os.CreateTemp("", "timing-in-"+strconv.Itoa(int(ssrc))+"-*.csv")
+	tempFile, err := os.CreateTemp("", "timing-out-"+strconv.Itoa(int(ssrc))+"-*.csv")
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to create temp file for timing logs")
 	}
