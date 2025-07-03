@@ -50,16 +50,10 @@ has_gcc_stats = 'GCCStats.State' in sender_df
 has_scream_stats = 'ScreamStats.TargetBitrate' in sender_df
 
 num_rows = 3
-specs = [[{"type": "scatter"}], [{"type": "scatter"}], [{"type": "scatter"}]]
 if has_gcc_stats:
     num_rows = 6
-    specs.append([{"type": "scatter"}])
-    specs.append([{"type": "scatter"}])
-    specs.append([{"type": "gantt"}])
 if has_scream_stats:
     num_rows = 5
-    specs.append([{"type": "scatter"}])
-    specs.append([{"type": "scatter"}])
 
 fig = make_subplots(rows=num_rows, cols=1, shared_xaxes=True, vertical_spacing=0.03)
 
