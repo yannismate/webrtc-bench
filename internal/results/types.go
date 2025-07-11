@@ -45,14 +45,15 @@ type ResultRowOutboundRTP struct {
 }
 
 type GCCStats struct {
-	LossTargetBitrate  uint32
-	AverageLoss        float64
-	DelayTargetBitrate uint32
-	DelayMeasurement   float64
-	DelayEstimate      float64
-	DelayThreshold     float64
-	Usage              string
-	State              string
+	LossTargetBitrate       uint32
+	AverageLoss             float64
+	DelayTargetBitrate      uint32
+	DelayMeasurement        float64
+	DelayEstimate           float64
+	DelayThreshold          float64
+	Usage                   string
+	State                   string
+	DetectedReconfiguration *bool
 }
 
 type ScreamStats struct {

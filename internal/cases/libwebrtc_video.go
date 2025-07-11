@@ -27,14 +27,15 @@ type CaseVideoLibWebRTC struct {
 }
 
 type gccStatsSignal struct {
-	LossTargetBitrate  uint32
-	AverageLoss        float64
-	DelayTargetBitrate uint32
-	DelayMeasurement   float64
-	DelayTrend         float64
-	DelayThreshold     float64
-	Usage              int
-	State              int
+	LossTargetBitrate       uint32
+	AverageLoss             float64
+	DelayTargetBitrate      uint32
+	DelayMeasurement        float64
+	DelayTrend              float64
+	DelayThreshold          float64
+	Usage                   int
+	State                   int
+	DetectedReconfiguration bool
 }
 
 type statTypeInterface struct {
@@ -103,9 +104,15 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 		bitrateStr = "10000"
 	}
 
+	detectionEnabled := false
+	if val, ok := config.AdditionalConfig["enable_detection"]; ok && val == "true" {
+		detectionEnabled = true
+	}
+
 	c.process = exec.Command("bin/gcc_tester", "--sender", strconv.FormatBool(config.SendOffer),
 		"--bitrate", bitrateStr, "--ice", config.ICEServers[0],
-		"--stat-interval", strconv.Itoa(int(time.Duration(config.StatInterval).Milliseconds())))
+		"--stat-interval", strconv.Itoa(int(time.Duration(config.StatInterval).Milliseconds())),
+		"--enable-detection", strconv.FormatBool(detectionEnabled))
 	c.process.Dir = cwd
 	log.Info().Msgf("Starting external process with command '%v'", c.process.String())
 
@@ -292,14 +299,15 @@ func convertSignalToGCCStats(signal gccStatsSignal) results.GCCStats {
 	}
 
 	return results.GCCStats{
-		LossTargetBitrate:  signal.LossTargetBitrate,
-		AverageLoss:        signal.AverageLoss,
-		DelayTargetBitrate: signal.DelayTargetBitrate,
-		DelayMeasurement:   signal.DelayMeasurement,
-		DelayEstimate:      signal.DelayTrend,
-		DelayThreshold:     signal.DelayThreshold,
-		Usage:              usage,
-		State:              state,
+		LossTargetBitrate:       signal.LossTargetBitrate,
+		AverageLoss:             signal.AverageLoss,
+		DelayTargetBitrate:      signal.DelayTargetBitrate,
+		DelayMeasurement:        signal.DelayMeasurement,
+		DelayEstimate:           signal.DelayTrend,
+		DelayThreshold:          signal.DelayThreshold,
+		Usage:                   usage,
+		State:                   state,
+		DetectedReconfiguration: &signal.DetectedReconfiguration,
 	}
 }
 
