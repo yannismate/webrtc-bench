@@ -212,13 +212,41 @@ if 'GCCStats.State' in sender_df:
         df_state_segments.append(dict(Task="State", Start=curr_start, Finish=state.index[-1], Resource=curr_state))
 
     usage_gantt = ff.create_gantt(
-        df_usage_segments + df_state_segments,
-        group_tasks=True,
-        colors=usage_color_map | state_color_map,
-        index_col='Resource',
-    )
+            df_usage_segments + df_state_segments,
+            group_tasks=True,
+            colors=usage_color_map | state_color_map,
+            index_col='Resource',
+        )
     for trace in usage_gantt.data:
         fig.add_trace(trace, row=6, col=1)
+
+    # build Gantt for GCCStats.DetectedReconfiguration
+    if 'GCCStats.DetectedReconfiguration' in sender_df:
+        detected_reconfiguration = sender_df["GCCStats.DetectedReconfiguration"]
+        df_reconfig_segments = []
+        curr_state, curr_start = None, None
+        for t, s in detected_reconfiguration.items():
+            if pd.isna(s): continue
+            if s != curr_state:
+                if curr_state is not None:
+                    df_reconfig_segments.append(dict(Task="DetectedReconfiguration", Start=curr_start, Finish=t, Resource=str(curr_state)))
+                curr_state, curr_start = s, t
+        if curr_state is not None:
+            df_reconfig_segments.append(dict(Task="DetectedReconfiguration", Start=curr_start, Finish=detected_reconfiguration.index[-1], Resource=str(curr_state)))
+
+        # Add Gantt chart for DetectedReconfiguration
+        reconfig_states = detected_reconfiguration.dropna().unique()
+        reconfig_colors = px.colors.qualitative.Dark24
+        reconfig_color_map = {str(s): reconfig_colors[i % len(reconfig_colors)] for i, s in enumerate(reconfig_states)}
+
+        reconfig_gantt = ff.create_gantt(
+            df_reconfig_segments,
+            group_tasks=True,
+            colors=reconfig_color_map,
+            index_col='Resource',
+        )
+        for trace in reconfig_gantt.data:
+            fig.add_trace(trace, row=6, col=1)
 
 # SCReAM Stats
 if has_scream_stats:
