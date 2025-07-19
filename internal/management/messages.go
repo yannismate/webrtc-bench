@@ -41,7 +41,6 @@ const (
 	ClientStateTestReady    ClientState = "test_ready"
 	ClientStateTesting      ClientState = "testing"
 	ClientStateTestEnding   ClientState = "test_ending"
-	ClientStateFailure      ClientState = "failure"
 	ClientStateDisconnected ClientState = "disconnected"
 )
 
@@ -50,8 +49,9 @@ type MessageClientStateUpdate struct {
 }
 
 type MessageConfigureClient struct {
-	CaseType cases.CaseType
-	Config   cases.PeerCaseConfig
+	CaseType     cases.CaseType
+	Config       cases.PeerCaseConfig
+	CaseDuration util.JSONDuration
 }
 
 type MessagePeerSignal struct {

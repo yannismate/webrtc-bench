@@ -281,6 +281,11 @@ func (c *client) configureCase(configMsg MessageConfigureClient) {
 		default:
 			log.Fatal().Msgf("Unrecognized caseType: %s", configMsg.CaseType)
 		}
+	} else if configMsg.Config.Implementation == cases.PeerImplementationIPerf {
+		if configMsg.CaseType != cases.CaseTypeBandwidthMeasurement {
+			log.Fatal().Msgf("Unrecognized caseType: %s", configMsg.CaseType)
+		}
+		c.CurrentCase = &cases.CaseIPerfUDP{Duration: time.Duration(configMsg.CaseDuration)}
 	} else {
 		log.Fatal().Msgf("Unrecognized implementation type: %s", configMsg.CaseType)
 	}

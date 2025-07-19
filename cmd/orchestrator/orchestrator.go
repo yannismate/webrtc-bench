@@ -131,8 +131,9 @@ func main() {
 			log.Info().Msg("Configuring clients")
 			for name, peerConfig := range testCases[currentCase].PeerConfigs {
 				err := server.SendMessage(name, management.MessageTypeConfigureClient, management.MessageConfigureClient{
-					CaseType: testCases[currentCase].CaseType,
-					Config:   peerConfig,
+					CaseType:     testCases[currentCase].CaseType,
+					Config:       peerConfig,
+					CaseDuration: testCases[currentCase].Duration,
 				})
 				if err != nil {
 					log.Fatal().Err(err).Msg("Failed to send configure client message")

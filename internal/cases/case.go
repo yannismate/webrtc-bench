@@ -8,8 +8,9 @@ import (
 type CaseType string
 
 const (
-	CaseTypeConnect CaseType = "connect"
-	CaseTypeVideo   CaseType = "video"
+	CaseTypeConnect              CaseType = "connect"
+	CaseTypeVideo                CaseType = "video"
+	CaseTypeBandwidthMeasurement CaseType = "bandwidth_measurement"
 )
 
 type Case struct {
@@ -33,6 +34,7 @@ const (
 	PeerImplementationPion      PeerImplementation = "pion"
 	PeerImplementationChrome    PeerImplementation = "chrome"
 	PeerImplementationLibWebRTC PeerImplementation = "libwebrtc"
+	PeerImplementationIPerf     PeerImplementation = "iperf"
 )
 
 type PeerCaseConfig struct {
