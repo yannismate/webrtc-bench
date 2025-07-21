@@ -81,7 +81,6 @@ func (c *client) Start() {
 					return
 				}
 			case <-ticker.C:
-				_ = conn.SetWriteDeadline(time.Now().Add(time.Second * 10))
 				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 					_ = conn.Close()
 					log.Warn().Err(err).Msg("Could not ping client, closing connection...")

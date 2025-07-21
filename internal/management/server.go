@@ -174,7 +174,6 @@ func (s *server) handleWs(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			case <-ticker.C:
-				_ = c.SetWriteDeadline(time.Now().Add(time.Second * 10))
 				if err := c.WriteMessage(websocket.PingMessage, nil); err != nil {
 					_ = c.Close()
 					log.Warn().Err(err).Msg("Could not ping client, closing connection...")
