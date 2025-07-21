@@ -53,7 +53,7 @@ func (c *client) Start() {
 		log.Fatal().Err(err).Msg("Failed to connect to management server")
 	}
 
-	sendChan := make(chan []byte)
+	sendChan := make(chan []byte, 3)
 	c.SendChan = sendChan
 
 	go c.SendMessage(MessageTypeRegisterClient, MessageRegisterClient{ClientName: c.ClientName})
@@ -202,6 +202,7 @@ func (c *client) Start() {
 						AdditionalFiles: c.CurrentCase.GetExtraResultFiles(),
 					})
 				}
+				log.Debug().Msgf("Sent case results message.")
 
 				c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateRegistered})
 			case MessageTypePeerSignal:

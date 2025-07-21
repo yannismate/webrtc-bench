@@ -139,7 +139,7 @@ func (s *server) handleWs(w http.ResponseWriter, r *http.Request) {
 	clientId := uuid.New().String()
 	log.Info().Str("client_id", clientId).Msg("Client connected")
 
-	sendChan := make(chan []byte)
+	sendChan := make(chan []byte, 3)
 	s.Clients[clientId] = wsClient{
 		SendChan: sendChan,
 	}
