@@ -70,11 +70,13 @@ func (c *client) Start() {
 			case msg, ok := <-c.SendChan:
 				if !ok {
 					_ = conn.WriteMessage(websocket.CloseMessage, nil)
+					log.Warn().Msg("SendChan closed before message was queued.")
 					return
 				}
 
 				err := conn.WriteMessage(websocket.BinaryMessage, msg)
 				if err != nil {
+					log.Error().Err(err).Msg("Failed to send message to management server.")
 					_ = conn.Close()
 					return
 				}
