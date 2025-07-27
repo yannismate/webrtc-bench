@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"webrtc-bench/internal/cases/stats"
@@ -54,10 +55,26 @@ const (
 
 func (c *CaseVideoPion) Configure(config PeerCaseConfig, sendSignal func(signalType PeerSignalType, data []byte) error, statCollector stats.StatCollector) error {
 	c.sendSignal = sendSignal
+	var turnServers []string
+	var stunServers []string
+	for _, url := range config.ICEServers {
+		if strings.HasPrefix(url, "turn") {
+			turnServers = append(turnServers, url)
+		} else {
+			stunServers = append(stunServers, url)
+		}
+	}
+
 	c.webrtcCfg = webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
 			{
-				URLs: config.ICEServers,
+				URLs: stunServers,
+			},
+			{
+				URLs:           turnServers,
+				Username:       config.AdditionalConfig["turn_user"],
+				Credential:     config.AdditionalConfig["turn_password"],
+				CredentialType: webrtc.ICECredentialTypePassword,
 			},
 		},
 	}
