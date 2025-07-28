@@ -109,10 +109,16 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 		detectionEnabled = true
 	}
 
+	realEncodingEnabled := false
+	if val, ok := config.AdditionalConfig["use_real_codec"]; ok && val == "true" {
+		realEncodingEnabled = true
+	}
+
 	c.process = exec.Command("bin/gcc_tester", "--sender", strconv.FormatBool(config.SendOffer),
 		"--bitrate", bitrateStr, "--ice", config.ICEServers[0],
 		"--stat-interval", strconv.Itoa(int(time.Duration(config.StatInterval).Milliseconds())),
-		"--enable-detection", strconv.FormatBool(detectionEnabled))
+		"--enable-detection", strconv.FormatBool(detectionEnabled),
+		"--use-real-codec", strconv.FormatBool(realEncodingEnabled))
 	c.process.Dir = cwd
 	log.Info().Msgf("Starting external process with command '%v'", c.process.String())
 
