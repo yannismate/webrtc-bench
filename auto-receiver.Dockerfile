@@ -9,6 +9,8 @@ FROM golang:1.24 AS build
 
 WORKDIR /go/src
 
+RUN go install github.com/heistp/irtt/cmd/irtt@latest
+
 ADD go.mod /go/src
 ADD go.sum /go/src
 RUN go mod download
@@ -29,5 +31,6 @@ RUN ln -s /opt/headless-shell/chrome-headless-shell /opt/headless-shell/headless
 ENV PATH="$PATH:/opt/headless-shell"
 COPY --from=build /go/bin /bin
 ADD bin /root/bin
+RUN mv /bin/irtt /root/bin/irtt
 
 CMD ["/bin/peer", "--server", "135.220.32.39:8080", "--name", "receiver", "--v"]
