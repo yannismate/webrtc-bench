@@ -137,6 +137,8 @@ def load_results_grouped_by_hour(folder_path):
             measurement_type = parts[0]
             measurement_timestamp = parts[-1]
             advanced_name = '-'.join(parts[1:-1])
+            #if int(measurement_timestamp) < 1753909140:
+            #    print("DELETE", dir_name)
             parsed_ts = datetime.fromtimestamp(int(measurement_timestamp))
             parsed_ts = parsed_ts.replace(second=0, microsecond=0, minute=0, hour=parsed_ts.hour)
             if parsed_ts.timestamp() not in result_by_hour:
@@ -144,12 +146,18 @@ def load_results_grouped_by_hour(folder_path):
             if measurement_type == "bandwidth_measurement":
                 json_path = os.path.join(dir_path, dir_name, 'iperf-receiver.json')
                 if os.path.exists(json_path):
-                    result_by_hour[parsed_ts.timestamp()][advanced_name] = extract_iperf_quantiles(load_iperf_json(json_path))
+                    try:
+                        result_by_hour[parsed_ts.timestamp()][advanced_name] = extract_iperf_quantiles(load_iperf_json(json_path))
+                    except:
+                        print("Error while loading data from iperf file")
             else:
                 result_by_hour[parsed_ts.timestamp()][advanced_name] = {}
                 receiver_path = os.path.join(dir_path, dir_name, 'receiver.parquet')
                 if os.path.exists(receiver_path):
-                    result_by_hour[parsed_ts.timestamp()][advanced_name] = extract_parquet_quantiles(load_parquet(receiver_path), args.resample_ms)
+                    try:
+                        result_by_hour[parsed_ts.timestamp()][advanced_name] = extract_parquet_quantiles(load_parquet(receiver_path), args.resample_ms)
+                    except:
+                        print("Error while loading parquet data")
     return result_by_hour
 
 data = load_results_grouped_by_hour(args.path)
@@ -224,13 +232,14 @@ for advanced_name in ordered_advanced_names[:7]:
 
 fig.update_layout(
     height=5000,
-    title_text="24-Hour Performance Analysis",
+    title_text="24-Hour Performance Analysis " + args.path,
     showlegend=False
 )
 
-for row in range(1, 22):
-    row_advanced_name = ordered_advanced_names[(row - 1) % 7]
-    row_metric = metrics[(row - 1) // 7]
+for row in range(1, 3*len(ordered_advanced_names) + 1):
+    print(row, ordered_advanced_names)
+    row_advanced_name = ordered_advanced_names[(row - 1) % len(ordered_advanced_names)]
+    row_metric = metrics[(row - 1) // len(ordered_advanced_names)]
 
     if row_metric == 'throughput':
         y_title = "Throughput (kbps)"
@@ -270,3 +279,5 @@ for group, avg in averages.items():
     print(f"Group: {group}, Average Throughput: {avg['throughput']:.2f} kbps, Average Loss Rate: {avg['loss']:.2f}")
 
 fig.show()
+
+fig.write_html(os.path.join(args.path, "graph.html"))
