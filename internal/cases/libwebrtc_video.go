@@ -6,6 +6,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"os"
 	"os/exec"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -114,11 +115,23 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 		realEncodingEnabled = true
 	}
 
+	ffmpegSourceEnabled := false
+	if val, ok := config.AdditionalConfig["use_ffmpeg_source"]; ok && val == "true" {
+		ffmpegSourceEnabled = true
+	}
+
+	ffmpegSourceFile := path.Join(cwd, "testdata", "test.y4m")
+	if val, ok := config.AdditionalConfig["ffmpeg_source_file"]; ok {
+		ffmpegSourceFile = val
+	}
+
 	c.process = exec.Command("bin/gcc_tester", "--sender", strconv.FormatBool(config.SendOffer),
 		"--bitrate", bitrateStr, "--ice", config.ICEServers[0],
 		"--stat-interval", strconv.Itoa(int(time.Duration(config.StatInterval).Milliseconds())),
 		"--enable-detection", strconv.FormatBool(detectionEnabled),
-		"--use-real-codec", strconv.FormatBool(realEncodingEnabled))
+		"--use-real-codec", strconv.FormatBool(realEncodingEnabled),
+		"--use-ffmpeg-source", strconv.FormatBool(ffmpegSourceEnabled),
+		"--ffmpeg-source-file", ffmpegSourceFile)
 	c.process.Dir = cwd
 	log.Info().Msgf("Starting external process with command '%v'", c.process.String())
 
