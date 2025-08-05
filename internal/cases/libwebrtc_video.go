@@ -120,7 +120,7 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 		ffmpegSourceEnabled = true
 	}
 
-	ffmpegSourceFile := path.Join(cwd, "testdata", "test.y4m")
+	ffmpegSourceFile := path.Join(cwd, "testdata", "webcam.mkv")
 	if val, ok := config.AdditionalConfig["ffmpeg_source_file"]; ok {
 		ffmpegSourceFile = val
 	}
