@@ -292,6 +292,7 @@ func (c *client) dishySetup() {
 	obMapRes := res.Response.(*dishy.Response_DishGetObstructionMap)
 	log.Info().Msgf("Dishy found! Obstruction map reference frame: %v", obMapRes.DishGetObstructionMap.MapReferenceFrame.String())
 	c.dishyAvailable = true
+	c.dishyStopDataCollectionChan = make(chan bool)
 	c.dishyObstructionData = &obstructionData{ReferenceFrame: obMapRes.DishGetObstructionMap.MapReferenceFrame.String()}
 }
 
@@ -304,6 +305,9 @@ func (c *client) startObstructionMapTracking() {
 		n := 0
 		for {
 			select {
+			case _, _ = <-c.dishyStopDataCollectionChan:
+				log.Debug().Msg("Dishy data collection stop signal received.")
+				return
 			case <-ticker.C:
 				if n == 0 {
 					log.Debug().Msg("Resetting obstruction map")
@@ -341,9 +345,6 @@ func (c *client) startObstructionMapTracking() {
 				})
 
 				n = (n + 1) % 14
-			case <-c.dishyStopDataCollectionChan:
-				log.Debug().Msg("Dishy data collection stop signal received.")
-				return
 			}
 		}
 	}()
@@ -351,7 +352,7 @@ func (c *client) startObstructionMapTracking() {
 
 func (c *client) stopObstructionMapTracking() {
 	log.Debug().Msg("Stopping dishy obstruction map tracking...")
-	c.dishyStopDataCollectionChan <- true
+	close(c.dishyStopDataCollectionChan)
 	c.dishyDataCollectionStopped.Wait()
 	log.Debug().Msg("Obstruction map tracking stopped.")
 }
