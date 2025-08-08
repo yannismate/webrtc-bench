@@ -56,8 +56,10 @@ type obstructionData struct {
 }
 
 type obstructionDataEntry struct {
-	Time time.Time
-	SNR  []snrEntry
+	Time            time.Time
+	SNR             []snrEntry
+	MinElevationDeg float32
+	MaxThetaDeg     float32
 }
 
 type snrEntry struct {
@@ -360,10 +362,11 @@ func (c *client) startObstructionMapTracking() {
 						})
 					}
 				}
-
 				c.dishyObstructionData.ObstructionData = append(c.dishyObstructionData.ObstructionData, obstructionDataEntry{
-					Time: time.Now(),
-					SNR:  entries,
+					Time:            time.Now(),
+					SNR:             entries,
+					MinElevationDeg: obMapRes.DishGetObstructionMap.MinElevationDeg,
+					MaxThetaDeg:     obMapRes.DishGetObstructionMap.MaxThetaDeg,
 				})
 
 				n = (n + 1) % 14
