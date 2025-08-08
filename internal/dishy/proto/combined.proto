@@ -1,0 +1,134 @@
+syntax = "proto3";
+
+package SpaceX.API.Device;
+
+import "status.proto";
+
+option go_package = "webrtc-bench/internal/dishy";
+
+message Request {
+  reserved 1018, 1025, 1026, 2012, 2016, 3011, 3014, 3202;
+
+  reserved "start_dish_self_test";
+
+  uint64 id = 1;
+
+  uint64 epoch_id = 14;
+
+  string target_id = 13;
+
+  oneof request {
+    GetLocationRequest get_location = 1017;
+
+    DishGetObstructionMapRequest dish_get_obstruction_map = 2008;
+
+    DishClearObstructionMapRequest dish_clear_obstruction_map = 2017;
+  }
+}
+
+message Response {
+  reserved 1018, 1026, 2014, 2012, 2025, 3008, 3011, 3014, 3203;
+
+  reserved "start_dish_self_test";
+
+  uint64 id = 1;
+
+  SpaceX.API.Status.Status status = 2;
+
+  uint64 api_version = 3;
+
+  oneof response {
+    GetLocationResponse get_location = 1017;
+
+    DishGetObstructionMapResponse dish_get_obstruction_map = 2008;
+
+    DishClearObstructionMapResponse dish_clear_obstruction_map = 2015;
+  }
+}
+
+enum PositionSource {
+  AUTO = 0;
+
+  NONE = 1;
+
+  UT_INFO = 2;
+
+  EXTERNAL = 3;
+
+  GPS = 4;
+
+  STARLINK = 5;
+
+  GNC_FUSED = 6;
+
+  GNC_BAD_SAT = 7;
+
+  GNC_NO_ACCEL = 8;
+
+  GNC_PNT = 9;
+
+  GNC_STATIC = 10;
+}
+
+message GetLocationRequest {
+  PositionSource source = 1;
+}
+
+message LLAPosition {
+  double lat = 1;
+
+  double lon = 2;
+
+  double alt = 3;
+}
+
+message GetLocationResponse {
+  reserved 2;
+
+  reserved "ecef";
+
+  LLAPosition lla = 1;
+
+  double sigma_m = 4;
+
+  PositionSource source = 3;
+
+  double horizontal_speed_mps = 5;
+
+  double vertical_speed_mps = 6;
+}
+
+message DishGetObstructionMapRequest {
+}
+
+enum ObstructionMapReferenceFrame {
+  FRAME_UNKNOWN = 0;
+
+  FRAME_EARTH = 1;
+
+  FRAME_UT = 2;
+}
+
+message DishGetObstructionMapResponse {
+  uint32 num_rows = 1;
+
+  uint32 num_cols = 2;
+
+  repeated float snr = 3;
+
+  float min_elevation_deg = 4 [deprecated = true];
+
+  float max_theta_deg = 5;
+
+  ObstructionMapReferenceFrame map_reference_frame = 6;
+}
+
+message DishClearObstructionMapRequest {
+}
+
+message DishClearObstructionMapResponse {
+}
+
+service Device {
+  rpc Handle ( Request ) returns ( Response );
+}

@@ -2,18 +2,23 @@ package management
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"webrtc-bench/internal/cases"
 	"webrtc-bench/internal/cases/stats"
+	"webrtc-bench/internal/dishy"
 	"webrtc-bench/internal/results"
 	"webrtc-bench/internal/util"
 )
@@ -34,6 +39,23 @@ type client struct {
 	CurrentCaseConfig   cases.PeerCaseConfig
 	CurrentResultWriter results.ParquetResultsWriter
 	CurrentCaseMetadata util.TestMetadata
+
+	dishyClient                 dishy.DeviceClient
+	dishyAvailable              bool
+	dishyLat, dishyLong         float64
+	dishyObstructionData        *obstructionData
+	dishyStopDataCollectionChan chan bool
+	dishyDataCollectionStopped  sync.WaitGroup
+}
+
+type obstructionData struct {
+	ReferenceFrame  string
+	NumRows         int
+	NumColumns      int
+	ObstructionData []struct {
+		Time time.Time
+		SNR  []float32
+	}
 }
 
 func NewClient(serverAddress string, clientName string, authenticationKey string) Client {
@@ -41,13 +63,17 @@ func NewClient(serverAddress string, clientName string, authenticationKey string
 		ServerAddress:     serverAddress,
 		ClientName:        clientName,
 		AuthenticationKey: authenticationKey,
+		dishyAvailable:    false,
 	}
 }
 
 func (c *client) Start() {
+	c.dishySetup()
+
 	headers := http.Header{}
 	headers.Set(AuthenticationKeyHeader, c.AuthenticationKey)
 
+	log.Info().Msgf("Connecting to management server at %s as client %s", c.ServerAddress, c.ClientName)
 	conn, _, err := websocket.DefaultDialer.Dial("ws://"+c.ServerAddress, headers)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to connect to management server")
@@ -134,6 +160,9 @@ func (c *client) Start() {
 					log.Error().Msg("Cannot start execution, no case configured!")
 					continue
 				}
+				if c.dishyAvailable {
+					c.startObstructionMapTracking()
+				}
 				if c.CurrentCaseConfig.ConfigurationCommands != nil {
 					go func() {
 						cmdSecTicker := time.NewTicker(time.Second)
@@ -173,6 +202,9 @@ func (c *client) Start() {
 					continue
 				}
 				c.CurrentCase.Stop()
+				if c.dishyAvailable {
+					c.stopObstructionMapTracking()
+				}
 				c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateTestEnding})
 				log.Info().Msg("Case execution stopped")
 
@@ -197,10 +229,20 @@ func (c *client) Start() {
 						return
 					}
 
+					extraFiles := c.CurrentCase.GetExtraResultFiles()
+					if c.dishyAvailable {
+						dishyData, err := json.Marshal(c.dishyObstructionData)
+						if err != nil {
+							log.Fatal().Err(err).Msg("Error marshalling dishy data")
+							return
+						}
+						(*extraFiles)["dishy_"+c.ClientName+".json"] = dishyData
+					}
+
 					c.SendMessage(MessageTypeResults, MessageResults{
 						Metadata:        c.CurrentCaseMetadata,
 						FileData:        fileData,
-						AdditionalFiles: c.CurrentCase.GetExtraResultFiles(),
+						AdditionalFiles: extraFiles,
 					})
 				}
 				log.Debug().Msgf("Sent case results message.")
@@ -227,6 +269,86 @@ func (c *client) Start() {
 
 		}
 	}()
+}
+
+func (c *client) dishySetup() {
+	grpcClient, err := grpc.NewClient("192.168.100.1:9200", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Fatal().Err(err).Msg("Error creating dishy grpc client")
+		return
+	}
+	c.dishyClient = dishy.NewDeviceClient(grpcClient)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	res, err := c.dishyClient.Handle(ctx, &dishy.Request{
+		Request: &dishy.Request_DishGetObstructionMap{},
+	})
+	if err != nil {
+		log.Info().Err(err).Msg("Dishy not found.")
+		return
+	}
+
+	obMapRes := res.Response.(*dishy.Response_DishGetObstructionMap)
+	log.Info().Msgf("Dishy found! Obstruction map reference frame: %v", obMapRes.DishGetObstructionMap.MapReferenceFrame.String())
+	c.dishyAvailable = true
+	c.dishyObstructionData = &obstructionData{ReferenceFrame: obMapRes.DishGetObstructionMap.MapReferenceFrame.String()}
+}
+
+func (c *client) startObstructionMapTracking() {
+	go func() {
+		c.dishyDataCollectionStopped.Add(1)
+		defer c.dishyDataCollectionStopped.Done()
+
+		ticker := time.NewTicker(time.Second * 1)
+		n := 0
+		for {
+			select {
+			case <-ticker.C:
+				if n == 0 {
+					ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+					// reset obstruction map every 14 seconds
+					_, err := c.dishyClient.Handle(ctx, &dishy.Request{
+						Request: &dishy.Request_DishClearObstructionMap{},
+					})
+					cancel()
+					if err != nil {
+						log.Info().Err(err).Msg("Dishy obstruction map clearing failed.")
+						return
+					}
+				}
+
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				// reset obstruction map every 14 seconds
+				res, err := c.dishyClient.Handle(ctx, &dishy.Request{
+					Request: &dishy.Request_DishGetObstructionMap{},
+				})
+				cancel()
+				if err != nil {
+					log.Info().Err(err).Msg("Dishy obstruction map fetching failed.")
+					return
+				}
+
+				obMapRes := res.Response.(*dishy.Response_DishGetObstructionMap)
+				c.dishyObstructionData.ObstructionData = append(c.dishyObstructionData.ObstructionData, struct {
+					Time time.Time
+					SNR  []float32
+				}{
+					Time: time.Now(),
+					SNR:  obMapRes.DishGetObstructionMap.Snr,
+				})
+
+				n = (n + 1) % 14
+			case <-c.dishyStopDataCollectionChan:
+				return
+			}
+		}
+	}()
+}
+
+func (c *client) stopObstructionMapTracking() {
+	c.dishyStopDataCollectionChan <- true
+	c.dishyDataCollectionStopped.Wait()
 }
 
 func (c *client) Stop() {
