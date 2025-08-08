@@ -52,10 +52,17 @@ type obstructionData struct {
 	ReferenceFrame  string
 	NumRows         int
 	NumColumns      int
-	ObstructionData []struct {
-		Time time.Time
-		SNR  []float32
-	}
+	ObstructionData []obstructionDataEntry
+}
+
+type obstructionDataEntry struct {
+	Time time.Time
+	SNR  []snrEntry
+}
+
+type snrEntry struct {
+	Index int
+	Value float32
 }
 
 func NewClient(serverAddress string, clientName string, authenticationKey string) Client {
@@ -292,11 +299,15 @@ func (c *client) dishySetup() {
 	obMapRes := res.Response.(*dishy.Response_DishGetObstructionMap)
 	log.Info().Msgf("Dishy found! Obstruction map reference frame: %v", obMapRes.DishGetObstructionMap.MapReferenceFrame.String())
 	c.dishyAvailable = true
-	c.dishyStopDataCollectionChan = make(chan bool)
-	c.dishyObstructionData = &obstructionData{ReferenceFrame: obMapRes.DishGetObstructionMap.MapReferenceFrame.String()}
+	c.dishyObstructionData = &obstructionData{
+		ReferenceFrame: obMapRes.DishGetObstructionMap.MapReferenceFrame.String(),
+		NumRows:        int(obMapRes.DishGetObstructionMap.NumRows),
+		NumColumns:     int(obMapRes.DishGetObstructionMap.NumCols),
+	}
 }
 
 func (c *client) startObstructionMapTracking() {
+	c.dishyStopDataCollectionChan = make(chan bool)
 	go func() {
 		c.dishyDataCollectionStopped.Add(1)
 		defer c.dishyDataCollectionStopped.Done()
@@ -336,12 +347,19 @@ func (c *client) startObstructionMapTracking() {
 				}
 
 				obMapRes := res.Response.(*dishy.Response_DishGetObstructionMap)
-				c.dishyObstructionData.ObstructionData = append(c.dishyObstructionData.ObstructionData, struct {
-					Time time.Time
-					SNR  []float32
-				}{
+				var entries []snrEntry
+				for i, val := range obMapRes.DishGetObstructionMap.Snr {
+					if val != -1 {
+						entries = append(entries, snrEntry{
+							Index: i,
+							Value: val,
+						})
+					}
+				}
+
+				c.dishyObstructionData.ObstructionData = append(c.dishyObstructionData.ObstructionData, obstructionDataEntry{
 					Time: time.Now(),
-					SNR:  obMapRes.DishGetObstructionMap.Snr,
+					SNR:  entries,
 				})
 
 				n = (n + 1) % 14
