@@ -243,6 +243,10 @@ func (c *client) Start() {
 							log.Fatal().Err(err).Msg("Error marshalling dishy data")
 							return
 						}
+						if extraFiles == nil {
+							newExtraFiles := make(map[string][]byte)
+							extraFiles = &newExtraFiles
+						}
 						(*extraFiles)["dishy_"+c.ClientName+".json"] = dishyData
 					}
 
