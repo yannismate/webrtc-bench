@@ -306,6 +306,7 @@ func (c *client) startObstructionMapTracking() {
 			select {
 			case <-ticker.C:
 				if n == 0 {
+					log.Debug().Msg("Resetting obstruction map")
 					ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 					// reset obstruction map every 14 seconds
 					_, err := c.dishyClient.Handle(ctx, &dishy.Request{
@@ -318,6 +319,7 @@ func (c *client) startObstructionMapTracking() {
 					}
 				}
 
+				log.Debug().Msg("Fetching current obstruction map")
 				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 				// reset obstruction map every 14 seconds
 				res, err := c.dishyClient.Handle(ctx, &dishy.Request{
@@ -340,6 +342,7 @@ func (c *client) startObstructionMapTracking() {
 
 				n = (n + 1) % 14
 			case <-c.dishyStopDataCollectionChan:
+				log.Debug().Msg("Dishy data collection stop signal received.")
 				return
 			}
 		}
@@ -347,8 +350,10 @@ func (c *client) startObstructionMapTracking() {
 }
 
 func (c *client) stopObstructionMapTracking() {
+	log.Debug().Msg("Stopping dishy obstruction map tracking...")
 	c.dishyStopDataCollectionChan <- true
 	c.dishyDataCollectionStopped.Wait()
+	log.Debug().Msg("Obstruction map tracking stopped.")
 }
 
 func (c *client) Stop() {
