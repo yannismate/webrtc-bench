@@ -125,13 +125,19 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 		ffmpegSourceFile = val
 	}
 
+	ffmpegOutputEnabled := false
+	if val, ok := config.AdditionalConfig["use_ffmpeg_output"]; ok && val == "true" {
+		ffmpegOutputEnabled = true
+	}
+
 	c.process = exec.Command("bin/gcc_tester", "--sender", strconv.FormatBool(config.SendOffer),
 		"--bitrate", bitrateStr, "--ice", config.ICEServers[0],
 		"--stat-interval", strconv.Itoa(int(time.Duration(config.StatInterval).Milliseconds())),
 		"--enable-detection", strconv.FormatBool(detectionEnabled),
 		"--use-real-codec", strconv.FormatBool(realEncodingEnabled),
 		"--use-ffmpeg-source", strconv.FormatBool(ffmpegSourceEnabled),
-		"--ffmpeg-source-file", ffmpegSourceFile)
+		"--ffmpeg-source-file", ffmpegSourceFile,
+		"--use-ffmpeg-output", strconv.FormatBool(ffmpegOutputEnabled))
 	c.process.Dir = cwd
 	log.Info().Msgf("Starting external process with command '%v'", c.process.String())
 
