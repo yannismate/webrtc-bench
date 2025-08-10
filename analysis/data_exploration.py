@@ -6,6 +6,9 @@ from plotly.subplots import make_subplots
 import plotly.express as px
 import plotly.figure_factory as ff
 import argparse
+import json
+import math
+import datetime
 
 parser = argparse.ArgumentParser(description="Analyze and graph WebRTC stats from a results folder.")
 parser.add_argument("path", help="Path to the results")
@@ -43,8 +46,47 @@ def load_parquet(parquet_file_path):
     df.sort_index(inplace=True)
     return df
 
+def load_sat_switches(dishy_json_path):
+    with open(dishy_json_path) as dishy_json_file:
+        loaded_json = json.load(dishy_json_file)
+    num_rows = loaded_json["NumRows"]
+
+    def get_row_col(index):
+        row = index // num_rows
+        column = index % num_rows
+        return (row, column)
+
+    def get_distance(xa, ya, xb, yb):
+        return math.sqrt((xa-xb)**2 + (ya-yb)**2)
+
+    switch_timestamps = []
+    known_snr = []
+    latest_location_row = 0
+    latest_location_col = 0
+
+    for obstruction_entry in loaded_json["ObstructionData"]:
+        for snr in obstruction_entry["SNR"]:
+            snr_idx = snr["Index"]
+            if snr_idx in known_snr:
+                continue
+            known_snr.append(snr_idx)
+            known_snr = known_snr[-20:]
+            row, col = get_row_col(snr_idx)
+            distance = get_distance(latest_location_row, latest_location_col, row, col)
+            latest_location_row = row
+            latest_location_col = col
+            if distance > 3:
+                switch_timestamps.append(datetime.datetime.fromisoformat(obstruction_entry["Time"]))
+
+    return switch_timestamps[1:]
+
 sender_df = load_parquet(os.path.join(results_folder_path, "sender.parquet"))
 receiver_df = load_parquet(os.path.join(results_folder_path, "receiver.parquet"))
+
+sat_switches = []
+dishy_sender_path = os.path.join(results_folder_path, "dishy_sender.json")
+if os.path.exists(dishy_sender_path):
+    sat_switches = load_sat_switches(dishy_sender_path)
 
 has_gcc_stats = 'GCCStats.State' in sender_df
 has_scream_stats = 'ScreamStats.TargetBitrate' in sender_df
@@ -285,5 +327,10 @@ if has_scream_stats:
         row=5,
         col=1,
     )
+
+# Add vertical lines for satellite switches
+for switch_time in sat_switches:
+    if sender_df.index.min() <= switch_time <= sender_df.index.max():
+        fig.add_vline(x=switch_time, line_dash="dot", line_color="gray", opacity=0.5)
 
 fig.show()

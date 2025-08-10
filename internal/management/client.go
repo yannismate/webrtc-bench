@@ -314,6 +314,7 @@ func (c *client) dishySetup() {
 
 func (c *client) startObstructionMapTracking() {
 	c.dishyStopDataCollectionChan = make(chan bool)
+	c.dishyObstructionData.ObstructionData = make([]obstructionDataEntry, 0)
 	go func() {
 		c.dishyDataCollectionStopped.Add(1)
 		defer c.dishyDataCollectionStopped.Done()

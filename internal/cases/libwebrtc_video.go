@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"github.com/rs/zerolog/log"
+	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -16,15 +17,16 @@ import (
 )
 
 type CaseVideoLibWebRTC struct {
-	sendSignal    func(signalType PeerSignalType, data []byte) error
-	statCollector stats.StatCollector
-	process       *exec.Cmd
-	stdinWriter   *bufio.Writer
-	stdoutReader  *bufio.Scanner
-	stderrReader  *bufio.Scanner
-	processMutex  sync.Mutex
-	isSender      bool
-	isStopping    bool
+	sendSignal          func(signalType PeerSignalType, data []byte) error
+	statCollector       stats.StatCollector
+	process             *exec.Cmd
+	stdinWriter         *bufio.Writer
+	stdoutReader        *bufio.Scanner
+	stderrReader        *bufio.Scanner
+	processMutex        sync.Mutex
+	isSender            bool
+	isStopping          bool
+	isUsingFFMpegOutput bool
 }
 
 type gccStatsSignal struct {
@@ -129,6 +131,7 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 	if val, ok := config.AdditionalConfig["use_ffmpeg_output"]; ok && val == "true" {
 		ffmpegOutputEnabled = true
 	}
+	c.isUsingFFMpegOutput = ffmpegOutputEnabled
 
 	c.process = exec.Command("bin/gcc_tester", "--sender", strconv.FormatBool(config.SendOffer),
 		"--bitrate", bitrateStr, "--ice", config.ICEServers[0],
@@ -337,6 +340,34 @@ func convertSignalToGCCStats(signal gccStatsSignal) results.GCCStats {
 }
 
 func (c *CaseVideoLibWebRTC) GetExtraResultFiles() *map[string][]byte {
+	if c.isUsingFFMpegOutput && !c.isSender {
+		cwd, err := os.Getwd()
+		if err != nil {
+			log.Error().Err(err).Msgf("Error getting current working directory")
+			return nil
+		}
+		outputFilePath := path.Join(cwd, "received_video.ts")
+		outputFile, err := os.Open(outputFilePath)
+		if err != nil {
+			log.Error().Err(err).Msgf("Error opening video output file: %s", outputFilePath)
+			return nil
+		}
+
+		videoBytes, err := io.ReadAll(outputFile)
+		if err != nil {
+			log.Error().Err(err).Msgf("Error reading video output file: %s", outputFilePath)
+			return nil
+		}
+
+		err = os.Remove(outputFilePath)
+		if err != nil {
+			log.Error().Err(err).Msgf("Error deleting video output file: %s", outputFilePath)
+		}
+
+		return &map[string][]byte{
+			"received_video.ts": videoBytes,
+		}
+	}
 	return nil
 }
 
