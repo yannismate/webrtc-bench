@@ -21,15 +21,12 @@ RUN go build -o /go/bin/orchestrator cmd/orchestrator/orchestrator.go
 RUN go build -o /go/bin/peer cmd/peer/peer.go
 
 
-FROM debian:12
+FROM debian:13
 
 WORKDIR /root
 ADD testdata /root/testdata
-RUN echo "deb http://deb.debian.org/debian testing main" > /etc/apt/sources.list.d/testing.list && \
-    echo 'APT::Default-Release "stable";' > /etc/apt/apt.conf.d/99defaultrelease
 RUN apt update && apt install -y libglib2.0-0 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libxcomposite1 libxdamage1 \
-    libxfixes3 libnss3 libxrandr2 libgbm1 libxkbcommon0 libasound2 iproute2 iperf3 software-properties-common && \
-    apt install -y -t testing ffmpeg
+    libxfixes3 libnss3 libxrandr2 libgbm1 libxkbcommon0 libasound2 iproute2 iperf3 ffmpeg
 
 COPY --from=chrome-download /tmp/headless-shell /opt/headless-shell
 RUN ln -s /opt/headless-shell/chrome-headless-shell /opt/headless-shell/headless-shell
