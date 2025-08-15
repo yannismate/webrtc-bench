@@ -8,6 +8,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import plotly.express as px
 
 def compute_cdf(values: List[float]) -> Tuple[np.ndarray, np.ndarray]:
     arr = np.asarray(values, dtype=float)
@@ -82,20 +83,12 @@ def load_irtt_rtts(irtt_sender_json: str) -> List[float]:
 
 
 # ----------------------
-# Main logic
+# Helpers
 # ----------------------
 
-def main():
-    parser = argparse.ArgumentParser(description="Plot CDFs for Bitrate, RTT, and Jitter from a measurement folder (iperf or parquet).")
-    parser.add_argument("path", help="Path to the measurement folder to analyze")
-    parser.add_argument("--resample-ms", type=int, default=100, help="Resample interval for rate calculations in ms (default: 100)")
-    args = parser.parse_args()
-
-    folder = args.path
-    resample_ms: int = args.resample_ms
-
+def analyze_folder(folder: str, resample_ms: int) -> Tuple[str, dict]:
     if not os.path.isdir(folder):
-        raise SystemExit(f"Given path is not a folder: {folder}")
+        raise ValueError(f"Given path is not a folder: {folder}")
 
     # Detect available sources
     iperf_receiver_path = os.path.join(folder, "iperf-receiver.json")
@@ -112,7 +105,7 @@ def main():
     rtt_values_ms: List[float] = []
     jitter_values_ms: List[float] = []
 
-    source_used = None
+    source_used: Optional[str] = None
 
     if has_iperf:
         # Prefer receiver iperf for actual received bitrate and jitter
@@ -135,7 +128,6 @@ def main():
         if os.path.exists(irtt_sender_path):
             rtt_values_ms.extend(load_irtt_rtts(irtt_sender_path))
         else:
-            # No IRTT RTTs; leave RTT empty for iperf-only measurement
             pass
 
     if not has_iperf and has_parquet:
@@ -158,43 +150,146 @@ def main():
         source_used = "parquet"
 
     if not has_iperf and not has_parquet:
-        raise SystemExit("No iperf or parquet data found in the provided folder.")
+        raise ValueError("No iperf or parquet data found in the provided folder.")
 
-    # Compute CDFs
-    bit_x, bit_y = compute_cdf([v for v in bitrate_values_mbps if np.isfinite(v) and v >= 0])
-    rtt_x, rtt_y = compute_cdf([v for v in rtt_values_ms if np.isfinite(v) and v >= 0])
-    jit_x, jit_y = compute_cdf([v for v in jitter_values_ms if np.isfinite(v) and v >= 0])
+    # Build a compact label based on folder path
+    base = os.path.basename(os.path.normpath(folder))
+    parent = os.path.basename(os.path.dirname(os.path.normpath(folder)))
+    name = f"{parent}/{base}" if parent else base
+
+    return name, {
+        "folder": folder,
+        "bitrate": [v for v in bitrate_values_mbps if np.isfinite(v) and v >= 0],
+        "rtt": [v for v in rtt_values_ms if np.isfinite(v) and v >= 0],
+        "jitter": [v for v in jitter_values_ms if np.isfinite(v) and v >= 0],
+        "source": source_used or "unknown",
+    }
+
+
+# ----------------------
+# Main logic
+# ----------------------
+
+def main():
+    parser = argparse.ArgumentParser(description="Plot CDFs for Bitrate, RTT, and Jitter from one or more measurement folders (iperf or parquet).")
+    parser.add_argument("paths", nargs="+", help="One or more paths to measurement folders to analyze")
+    parser.add_argument("--resample-ms", type=int, default=100, help="Resample interval for rate calculations in ms (default: 100)")
+    args = parser.parse_args()
+
+    folders: List[str] = args.paths
+    resample_ms: int = args.resample_ms
+
+    datasets = []
+    for folder in folders:
+        try:
+            name, data = analyze_folder(folder, resample_ms)
+            data["name"] = name
+            datasets.append(data)
+        except ValueError as e:
+            print(f"Warning: {e}")
+            continue
+
+    if not datasets:
+        raise SystemExit("No valid folders to analyze.")
+
+    # Determine which plots have any data
+    any_bit = any(len(d["bitrate"]) > 0 for d in datasets)
+    any_rtt = any(len(d["rtt"]) > 0 for d in datasets)
+    any_jit = any(len(d["jitter"]) > 0 for d in datasets)
 
     # Build Plotly figure with three rows
     rows = 3
-    fig = make_subplots(rows=rows, cols=1, shared_xaxes=False, vertical_spacing=0.06,
-                        subplot_titles=(
-                            "Bitrate CDF (Mbps)" if bit_x.size else "Bitrate CDF (no data)",
-                            "RTT CDF (ms)" if rtt_x.size else "RTT CDF (no data)",
-                            "Jitter CDF (ms)" if jit_x.size else "Jitter CDF (no data)",
-                        ))
+    fig = make_subplots(
+        rows=rows,
+        cols=1,
+        shared_xaxes=False,
+        vertical_spacing=0.06,
+        subplot_titles=(
+            "Bitrate CDF (Mbps)" if any_bit else "Bitrate CDF (no data)",
+            "RTT CDF (ms)" if any_rtt else "RTT CDF (no data)",
+            "Jitter CDF (ms)" if any_jit else "Jitter CDF (no data)",
+        ),
+    )
 
-    if bit_x.size:
-        fig.add_trace(go.Scatter(x=bit_x, y=bit_y, mode="lines", name="Bitrate (Mbps)"), row=1, col=1)
-        fig.update_xaxes(title_text="Mbps", row=1, col=1)
-        fig.update_yaxes(title_text="Probability", row=1, col=1, range=[0, 1])
+    # Color mapping per dataset for consistent colors across subplots
+    palette = px.colors.qualitative.Plotly
 
-    if rtt_x.size:
-        fig.add_trace(go.Scatter(x=rtt_x, y=rtt_y, mode="lines", name="RTT (ms)"), row=2, col=1)
-        fig.update_xaxes(title_text="ms", row=2, col=1)
-        fig.update_yaxes(title_text="Probability", row=2, col=1, range=[0, 1])
+    for idx, d in enumerate(datasets):
+        color = palette[idx % len(palette)]
+        name = d["name"]
+        legendgroup = name
+        legend_shown = False
 
-    if jit_x.size:
-        fig.add_trace(go.Scatter(x=jit_x, y=jit_y, mode="lines", name="Jitter (ms)"), row=3, col=1)
-        fig.update_xaxes(title_text="ms", row=3, col=1)
-        fig.update_yaxes(title_text="Probability", row=3, col=1, range=[0, 1])
+        bit_x, bit_y = compute_cdf(d["bitrate"]) if any_bit else (np.array([]), np.array([]))
+        rtt_x, rtt_y = compute_cdf(d["rtt"]) if any_rtt else (np.array([]), np.array([]))
+        jit_x, jit_y = compute_cdf(d["jitter"]) if any_jit else (np.array([]), np.array([]))
 
-    title_src = f" | Source: {source_used}" if source_used else ""
-    fig.update_layout(title_text=f"CDFs for Bitrate, RTT, Jitter{title_src}<br>{folder}", height=900, showlegend=False)
+        if bit_x.size:
+            fig.add_trace(
+                go.Scatter(
+                    x=bit_x,
+                    y=bit_y,
+                    mode="lines",
+                    name=name,
+                    legendgroup=legendgroup,
+                    line=dict(color=color),
+                    showlegend=not legend_shown,
+                ),
+                row=1,
+                col=1,
+            )
+            legend_shown = True
+        if rtt_x.size:
+            fig.add_trace(
+                go.Scatter(
+                    x=rtt_x,
+                    y=rtt_y,
+                    mode="lines",
+                    name=name,
+                    legendgroup=legendgroup,
+                    line=dict(color=color, dash="dash"),
+                    showlegend=not legend_shown,
+                ),
+                row=2,
+                col=1,
+            )
+            legend_shown = True
+        if jit_x.size:
+            fig.add_trace(
+                go.Scatter(
+                    x=jit_x,
+                    y=jit_y,
+                    mode="lines",
+                    name=name,
+                    legendgroup=legendgroup,
+                    line=dict(color=color, dash="dot"),
+                    showlegend=not legend_shown,
+                ),
+                row=3,
+                col=1,
+            )
+            legend_shown = True
+
+    # Axes
+    fig.update_xaxes(title_text="Mbps", row=1, col=1)
+    fig.update_yaxes(title_text="Probability", row=1, col=1, range=[0, 1])
+
+    fig.update_xaxes(title_text="ms", row=2, col=1)
+    fig.update_yaxes(title_text="Probability", row=2, col=1, range=[0, 1])
+
+    fig.update_xaxes(title_text="ms", row=3, col=1)
+    fig.update_yaxes(title_text="Probability", row=3, col=1, range=[0, 1])
+
+    # Title
+    names_for_title = ", ".join(d["name"] for d in datasets)
+    fig.update_layout(
+        title_text=f"CDFs for Bitrate, RTT, Jitter | Folders: {names_for_title}",
+        height=900,
+        showlegend=True,
+    )
 
     fig.show()
 
 
 if __name__ == "__main__":
     main()
-
