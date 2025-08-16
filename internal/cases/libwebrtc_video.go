@@ -296,8 +296,12 @@ func (c *CaseVideoLibWebRTC) Stop() {
 	defer c.processMutex.Unlock()
 
 	c.isStopping = true
+	if _, err := c.stdinWriter.WriteString("STOP\n"); err != nil {
+		log.Info().Err(err).Msgf("Failed to send stop command to libwebrtc")
+	}
 	if c.process != nil && c.process.Process != nil {
 		_ = c.process.Process.Kill()
+		_ = c.process.Wait()
 	}
 }
 

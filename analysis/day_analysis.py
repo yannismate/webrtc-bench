@@ -11,8 +11,10 @@ from datetime import datetime
 
 parser = argparse.ArgumentParser(description="Analyze and graph 24hr stats from a results folder.")
 parser.add_argument("path", help="Path to the results")
-parser.add_argument("--resample-ms", type=int, default=100, help="Interval for resampling rate graphs in ms")
+parser.add_argument("--resample-ms", type=int, default=200, help="Interval for resampling rate graphs in ms")
 args = parser.parse_args()
+
+quantile_parts = [0.01, 0.25, 0.5, 0.75, 0.99]
 
 def load_parquet(parquet_file_path):
     print(f"Loading parquet {parquet_file_path}")
@@ -56,32 +58,32 @@ def load_iperf_json(json_path):
 def extract_iperf_quantiles(iperf_df):
     quantiles = {}
 
-    q = iperf_df['bits_per_second'].quantile([0, 0.25, 0.5, 0.75, 1.0])
+    q = iperf_df['bits_per_second'].quantile(quantile_parts)
     quantiles['throughput'] = {
-        'min': q[0],
+        'min': q[0.01],
         'q1': q[0.25],
         'median': q[0.5],
         'q3': q[0.75],
-        'max': q[1.0]
+        'max': q[0.99]
     }
 
-    q = iperf_df['jitter_ms'].quantile([0, 0.25, 0.5, 0.75, 1.0])
+    q = iperf_df['jitter_ms'].quantile(quantile_parts)
     quantiles['jitter'] = {
-        'min': q[0],
+        'min': q[0.01],
         'q1': q[0.25],
         'median': q[0.5],
         'q3': q[0.75],
-        'max': q[1.0]
+        'max': q[0.99]
     }
 
     loss_decimal = iperf_df['lost_percent'] / 100
-    q = loss_decimal.quantile([0, 0.25, 0.5, 0.75, 1.0])
+    q = loss_decimal.quantile(quantile_parts)
     quantiles['loss'] = {
-        'min': q[0],
+        'min': q[0.01],
         'q1': q[0.25],
         'median': q[0.5],
         'q3': q[0.75],
-        'max': q[1.0]
+        'max': q[0.99]
     }
 
     return quantiles
@@ -93,23 +95,23 @@ def extract_parquet_quantiles(receiver_df, resample_ms):
     receiver_rate = receiver_df["InboundRTP.BytesReceived"].resample(f"{resample_ms}ms").max().diff().fillna(0).clip(lower=0)
     receiver_rate = (receiver_rate / 1000) * 8 * resampling_multiplier
 
-    q = receiver_rate.quantile([0, 0.25, 0.5, 0.75, 1.0])
+    q = receiver_rate.quantile(quantile_parts)
     quantiles['throughput'] = {
-        'min': q[0],
+        'min': q[0.01],
         'q1': q[0.25],
         'median': q[0.5],
         'q3': q[0.75],
-        'max': q[1.0]
+        'max': q[0.99]
     }
 
     jitter_ms = receiver_df['InboundRTP.Jitter'] * 1000
-    q = jitter_ms.quantile([0, 0.25, 0.5, 0.75, 1.0])
+    q = jitter_ms.quantile(quantile_parts)
     quantiles['jitter'] = {
-        'min': q[0],
+        'min': q[0.01],
         'q1': q[0.25],
         'median': q[0.5],
         'q3': q[0.75],
-        'max': q[1.0]
+        'max': q[0.99]
     }
 
     packets_receive_rate = receiver_df["InboundRTP.PacketsReceived"].resample(f"{resample_ms}ms").max().diff().fillna(0).clip(lower=0)
@@ -117,13 +119,13 @@ def extract_parquet_quantiles(receiver_df, resample_ms):
     loss_rate = packets_lost_rate / (packets_receive_rate + packets_lost_rate)
     loss_rate = loss_rate.fillna(0)
 
-    q = loss_rate.quantile([0, 0.25, 0.5, 0.75, 1.0])
+    q = loss_rate.quantile(quantile_parts)
     quantiles['loss'] = {
-        'min': q[0],
+        'min': q[0.01],
         'q1': q[0.25],
         'median': q[0.5],
         'q3': q[0.75],
-        'max': q[1.0]
+        'max': q[0.99]
     }
 
     return quantiles
@@ -148,16 +150,16 @@ def load_results_grouped_by_hour(folder_path):
                 if os.path.exists(json_path):
                     try:
                         result_by_hour[parsed_ts.timestamp()][advanced_name] = extract_iperf_quantiles(load_iperf_json(json_path))
-                    except:
-                        print("Error while loading data from iperf file")
+                    except Exception as e:
+                        print("Error while loading data from iperf file", e)
             else:
                 result_by_hour[parsed_ts.timestamp()][advanced_name] = {}
                 receiver_path = os.path.join(dir_path, dir_name, 'receiver.parquet')
                 if os.path.exists(receiver_path):
                     try:
                         result_by_hour[parsed_ts.timestamp()][advanced_name] = extract_parquet_quantiles(load_parquet(receiver_path), args.resample_ms)
-                    except:
-                        print("Error while loading parquet data")
+                    except Exception as e:
+                        print("Error while loading parquet data", e)
     return result_by_hour
 
 data = load_results_grouped_by_hour(args.path)

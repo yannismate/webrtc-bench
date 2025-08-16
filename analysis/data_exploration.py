@@ -13,7 +13,7 @@ import datetime
 parser = argparse.ArgumentParser(description="Analyze and graph WebRTC stats from a results folder.")
 parser.add_argument("path", help="Path to the results")
 parser.add_argument("--save", action="store_true", help="Save the graph as a PNG file instead of displaying it")
-parser.add_argument("--resample-ms", type=int, default=1000, help="Interval for resampling rate graphs in ms")
+parser.add_argument("--resample-ms", type=int, default=200, help="Interval for resampling rate graphs in ms")
 args = parser.parse_args()
 
 results_folder_path = args.path
