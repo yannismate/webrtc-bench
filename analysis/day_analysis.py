@@ -177,14 +177,20 @@ for name in all_advanced_names:
 
 metrics = ['throughput', 'loss', 'jitter']
 
+# Build subplot titles in metric-major order
 subplot_titles = []
 for metric in metrics:
     for name in ordered_advanced_names:
         subplot_titles.append(f"{metric} - {name}")
 
+# Dynamically compute rows based on the number of advanced names and metrics
+num_advanced = len(ordered_advanced_names)
+num_metrics = len(metrics)
+num_rows = num_metrics * num_advanced if num_advanced > 0 else 0
+
 fig = make_subplots(
-    rows=21, cols=1,
-    vertical_spacing=0.03,
+    rows=num_rows, cols=1,
+    vertical_spacing=0.5 * (1 / num_rows),
     subplot_titles=subplot_titles,
     shared_xaxes=False
 )
@@ -193,7 +199,7 @@ timestamps = sorted(data.keys())
 datetime_labels = [datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M') for ts in timestamps]
 
 advanced_name_num = 0
-for advanced_name in ordered_advanced_names[:7]:
+for advanced_name in ordered_advanced_names:
     metric_num = 0
     for metric in metrics:
         x_values = []
@@ -216,7 +222,7 @@ for advanced_name in ordered_advanced_names[:7]:
                 y_values.extend(synthetic_data)
                 x_values.extend([x_label] * (len(synthetic_data) - 1))
 
-        if x_values:
+        if x_values and num_rows > 0:
             fig.add_trace(
                 go.Box(
                     x=x_values,
@@ -226,22 +232,23 @@ for advanced_name in ordered_advanced_names[:7]:
                     showlegend=False,
                     pointpos=0
                 ),
-                row=1 + advanced_name_num + metric_num * 7, col=1
+                row=1 + advanced_name_num + metric_num * num_advanced, col=1
             )
         metric_num += 1
 
     advanced_name_num += 1
 
+# Scale figure height with the number of rows (fallback to a minimum height)
+per_row_height = 220
 fig.update_layout(
-    height=5000,
+    height=max(400, per_row_height * max(1, num_rows)),
     title_text="24-Hour Performance Analysis " + args.path,
     showlegend=False
 )
 
-for row in range(1, 3*len(ordered_advanced_names) + 1):
-    print(row, ordered_advanced_names)
-    row_advanced_name = ordered_advanced_names[(row - 1) % len(ordered_advanced_names)]
-    row_metric = metrics[(row - 1) // len(ordered_advanced_names)]
+for row in range(1, num_rows + 1):
+    row_advanced_name = ordered_advanced_names[(row - 1) % num_advanced] if num_advanced else ''
+    row_metric = metrics[(row - 1) // num_advanced] if num_advanced else ''
 
     if row_metric == 'throughput':
         y_title = "Throughput (kbps)"

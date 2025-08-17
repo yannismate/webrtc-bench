@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.express as px
 
+
 def compute_cdf(values: List[float]) -> Tuple[np.ndarray, np.ndarray]:
     arr = np.asarray(values, dtype=float)
     arr = arr[np.isfinite(arr)]
@@ -179,6 +180,18 @@ def main():
     folders: List[str] = args.paths
     resample_ms: int = args.resample_ms
 
+    if len(folders) == 1 and os.path.isdir(folders[0]):
+        root = folders[0]
+
+        try:
+            children = [os.path.join(root, name) for name in os.listdir(root)]
+            child_files = [p for p in children if os.path.isfile(p)]
+            child_dirs = sorted([p for p in children if os.path.isdir(p)])
+            if len(child_files) == 0 and len(child_dirs) > 0:
+                folders = child_dirs
+        except Exception:
+            pass
+
     datasets = []
     for folder in folders:
         try:
@@ -197,6 +210,20 @@ def main():
     any_rtt = any(len(d["rtt"]) > 0 for d in datasets)
     any_jit = any(len(d["jitter"]) > 0 for d in datasets)
 
+    # Derive a type from the folder basename (e.g., video-LibWebRTC-GCC-improved-123 -> LibWebRTC-GCC-improved)
+    def extract_type(folder_path: str) -> str:
+        base = os.path.basename(os.path.normpath(folder_path))
+        if base.startswith("video-"):
+            base = base[len("video-"):]
+        parts = base.split("-")
+        if parts and parts[-1].isdigit():
+            parts = parts[:-1]
+        t = "-".join(parts).strip()
+        return t or base
+
+    for d in datasets:
+        d["type"] = extract_type(d["folder"])  # add type for coloring/grouping
+
     # Build Plotly figure with three rows
     rows = 3
     fig = make_subplots(
@@ -211,11 +238,17 @@ def main():
         ),
     )
 
-    # Color mapping per dataset for consistent colors across subplots
+    # Color mapping per type for consistent colors across datasets and subplots
     palette = px.colors.qualitative.Plotly
+    types_in_order = []
+    for d in datasets:
+        if d["type"] not in types_in_order:
+            types_in_order.append(d["type"])
+    type_to_color = {t: palette[i % len(palette)] for i, t in enumerate(types_in_order)}
 
+    # Plot individual dataset lines colored by type
     for idx, d in enumerate(datasets):
-        color = palette[idx % len(palette)]
+        color = type_to_color[d["type"]]
         name = d["name"]
         legendgroup = name
         legend_shown = False
@@ -247,7 +280,7 @@ def main():
                     mode="lines",
                     name=name,
                     legendgroup=legendgroup,
-                    line=dict(color=color, dash="dash"),
+                    line=dict(color=color),
                     showlegend=not legend_shown,
                 ),
                 row=2,
@@ -262,13 +295,82 @@ def main():
                     mode="lines",
                     name=name,
                     legendgroup=legendgroup,
-                    line=dict(color=color, dash="dot"),
+                    line=dict(color=color),
                     showlegend=not legend_shown,
                 ),
                 row=3,
                 col=1,
             )
             legend_shown = True
+
+    # Aggregated lines per type (if multiple datasets share the same type)
+    from collections import defaultdict
+
+    type_groups = defaultdict(list)
+    for d in datasets:
+        type_groups[d["type"]].append(d)
+
+    shown_agg_in_legend = set()
+
+    for t, items in type_groups.items():
+        if len(items) < 2:
+            continue
+        color = type_to_color[t]
+        agg_name = f"{t} (all)"
+        # Concatenate values across datasets for each metric
+        bit_all = [v for it in items for v in it["bitrate"]]
+        rtt_all = [v for it in items for v in it["rtt"]]
+        jit_all = [v for it in items for v in it["jitter"]]
+
+        if any_bit:
+            x, y = compute_cdf(bit_all)
+            if x.size:
+                fig.add_trace(
+                    go.Scatter(
+                        x=x,
+                        y=y,
+                        mode="lines",
+                        name=agg_name,
+                        legendgroup=f"agg-{t}",
+                        line=dict(color=color, dash="dot", width=3),
+                        showlegend=(t not in shown_agg_in_legend),
+                    ),
+                    row=1,
+                    col=1,
+                )
+                shown_agg_in_legend.add(t)
+        if any_rtt:
+            x, y = compute_cdf(rtt_all)
+            if x.size:
+                fig.add_trace(
+                    go.Scatter(
+                        x=x,
+                        y=y,
+                        mode="lines",
+                        name=agg_name,
+                        legendgroup=f"agg-{t}",
+                        line=dict(color=color, dash="dot", width=3),
+                        showlegend=False,
+                    ),
+                    row=2,
+                    col=1,
+                )
+        if any_jit:
+            x, y = compute_cdf(jit_all)
+            if x.size:
+                fig.add_trace(
+                    go.Scatter(
+                        x=x,
+                        y=y,
+                        mode="lines",
+                        name=agg_name,
+                        legendgroup=f"agg-{t}",
+                        line=dict(color=color, dash="dot", width=3),
+                        showlegend=False,
+                    ),
+                    row=3,
+                    col=1,
+                )
 
     # Axes
     fig.update_xaxes(title_text="Mbps", row=1, col=1)

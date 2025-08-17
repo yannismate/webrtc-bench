@@ -85,8 +85,11 @@ receiver_df = load_parquet(os.path.join(results_folder_path, "receiver.parquet")
 
 sat_switches = []
 dishy_sender_path = os.path.join(results_folder_path, "dishy_sender.json")
+dishy_sender_path = os.path.join(results_folder_path, "dishy_receiver.json")
 if os.path.exists(dishy_sender_path):
     sat_switches = load_sat_switches(dishy_sender_path)
+elif os.path.exists(dishy_receiver_path):
+    sat_switches = load_sat_switches(dishy_receiver_path)
 
 has_gcc_stats = 'GCCStats.State' in sender_df
 has_scream_stats = 'ScreamStats.TargetBitrate' in sender_df
