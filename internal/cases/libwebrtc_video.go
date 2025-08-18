@@ -169,6 +169,9 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 	go func() {
 		var latestGCCStats *results.GCCStats
 		for c.stdoutReader.Scan() {
+			if c.isStopping {
+				return
+			}
 			line := c.stdoutReader.Text()
 			if strings.HasPrefix(line, "SIGNAL/") {
 				if strings.HasPrefix(line, "SIGNAL/SDP/") {
@@ -257,6 +260,9 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 
 	go func() {
 		for c.stderrReader.Scan() {
+			if c.isStopping {
+				return
+			}
 			line := c.stderrReader.Text()
 			if strings.HasPrefix(line, "(") {
 				log.Debug().Msgf("[libwebrtc] stderr: %s", line)
@@ -299,9 +305,18 @@ func (c *CaseVideoLibWebRTC) Stop() {
 	if _, err := c.stdinWriter.WriteString("STOP\n"); err != nil {
 		log.Info().Err(err).Msgf("Failed to send stop command to libwebrtc")
 	}
+	_ = c.stdinWriter.Flush()
+
 	if c.process != nil && c.process.Process != nil {
-		_ = c.process.Process.Kill()
 		_ = c.process.Wait()
+		if !c.process.ProcessState.Exited() {
+			log.Error().Msgf("LibWebRTC process did not exit, trying to kill!")
+			_ = c.process.Process.Kill()
+		}
+		if !c.process.ProcessState.Exited() {
+			log.Fatal().Msgf("LibWebRTC process did not exit!")
+		}
+		log.Info().Msgf("LibWebRTC process exited!")
 	}
 }
 
