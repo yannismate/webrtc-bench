@@ -1,0 +1,204 @@
+import os
+from enum import Enum
+import pandas as pd
+
+from loaders.dishy import dishy_from_file, DishyData
+from loaders.iperf import iperf_from_file, IPerfData
+from loaders.irtt import IrttData, irtt_from_file
+from loaders.parquet import ParquetData, parquet_from_file
+
+
+class MeasurementType(Enum):
+    BANDWIDTH_MEASUREMENT = "bandwidth_measurement"
+    VIDEO = "video"
+
+class Measurement:
+    folder_path: str
+    name: str
+    timestamp: pd.Timestamp
+    type: MeasurementType
+
+    data_dishy_sender: DishyData | None = None
+    data_dishy_receiver: DishyData | None = None
+    data_iperf_sender: IPerfData | None = None
+    data_iperf_receiver: IPerfData | None = None
+    data_irtt: IrttData | None = None
+    data_parquet_sender: ParquetData | None = None
+    data_parquet_receiver: ParquetData | None = None
+
+    def __init__(self, folder_path: str = None):
+        if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
+            raise ValueError(f"Folder '{folder_path}' does not exist.")
+
+        folder_name = os.path.basename(os.path.normpath(folder_path))
+
+        if folder_name.startswith("video"):
+            measurement_type = MeasurementType.VIDEO
+        elif folder_name.startswith("bandwidth_measurement"):
+            measurement_type = MeasurementType.BANDWIDTH_MEASUREMENT
+        else:
+            raise ValueError(f"Folder name '{folder_name}' does not match any known measurement type.")
+
+        name_parts = folder_name.split("-")
+        if len(name_parts) < 3:
+            raise ValueError(
+                f"Folder name '{folder_name}' does not contain enough parts to extract name and timestamp.")
+
+        name = "-".join(name_parts[1:-1])
+        try:
+            ts_int = int(name_parts[-1])
+            timestamp = pd.to_datetime(ts_int, unit='s', utc=True)
+        except Exception as e:
+            raise ValueError(f"Folder name '{folder_name}' contains invalid timestamp '{name_parts[-1]}'.") from e
+
+        self.folder_path = folder_path
+        self.name = name
+        self.timestamp = timestamp
+        self.type = measurement_type
+
+
+    def load_files(self):
+        self.__load_dishy_files()
+        self.__load_iperf_files()
+        self.__load_irtt_files()
+        self.__load_parquet_files()
+
+    def get_send_bitrate_kbps(self, resample_ms: int = 200) -> pd.Series | None:
+        if self.data_parquet_sender is not None:
+            return self.data_parquet_sender.get_send_bitrate_kbps(resample_ms)
+        if self.data_iperf_sender is not None:
+            return self.data_iperf_sender.get_send_bitrate_kbps()
+        return None
+
+    def get_recv_bitrate_kbps(self, resample_ms: int = 200) -> pd.Series | None:
+        if self.data_parquet_receiver is not None:
+            return self.data_parquet_receiver.get_recv_bitrate_kbps(resample_ms)
+        if self.data_iperf_receiver is not None:
+            return self.data_iperf_receiver.get_recv_bitrate_kbps()
+        return None
+
+    def get_rtt_ms(self) -> pd.Series | None:
+        if self.data_parquet_sender is not None:
+            rtt = self.data_parquet_sender.get_rtt_ms()
+            if rtt is not None:
+                return rtt
+
+        if self.data_parquet_receiver is not None:
+            rtt = self.data_parquet_receiver.get_rtt_ms()
+            if rtt is not None:
+                return rtt
+
+        if self.data_irtt is not None:
+           return self.data_irtt.get_rtt_ms()
+
+        return None
+
+    def get_jitter_ms(self) -> pd.Series | None:
+        if self.data_parquet_receiver is not None:
+            jitter = self.data_parquet_receiver.get_jitter_ms()
+            if jitter is not None:
+                return jitter
+
+        if self.data_irtt is not None:
+           return self.data_irtt.get_jitter_ms()
+
+        if self.data_iperf_receiver is not None:
+            jitter = self.data_iperf_receiver.get_jitter_ms()
+            if jitter is not None:
+                return jitter
+        return None
+
+    def get_congestion_bitrates(self) -> pd.DataFrame | None:
+        if self.data_parquet_sender is not None:
+            cong = self.data_parquet_sender.get_congestion_bitrates()
+            if cong is not None:
+                return cong
+        return None
+
+    def get_delay_estimate_ms(self) -> pd.Series | None:
+        if self.data_parquet_sender is not None:
+            delay_estimate = self.data_parquet_sender.get_delay_estimate()
+            if delay_estimate is not None:
+                return delay_estimate
+        return None
+
+    def get_feedback_interval_ms(self) -> pd.Series | None:
+        if self.data_parquet_sender is not None:
+            feedback_interval = self.data_parquet_sender.get_feedback_interval_ms()
+            if feedback_interval is not None:
+                return feedback_interval
+        return None
+
+    def get_timestamp_range(self) -> tuple[pd.Timestamp, pd.Timestamp]:
+        min_timestamp = pd.Timestamp.max.tz_localize('UTC')
+        max_timestamp = pd.Timestamp.min.tz_localize('UTC')
+        if self.data_parquet_sender is not None:
+            min_v, max_v = self.data_parquet_sender.get_timestamp_range()
+            min_timestamp = min(min_timestamp, min_v)
+            max_timestamp = max(max_timestamp, max_v)
+        if self.data_parquet_receiver is not None:
+            min_v, max_v = self.data_parquet_receiver.get_timestamp_range()
+            min_timestamp = min(min_timestamp, min_v)
+            max_timestamp = max(max_timestamp, max_v)
+        if self.data_iperf_sender is not None:
+            min_v, max_v = self.data_iperf_sender.get_timestamp_range()
+            min_timestamp = min(min_timestamp, min_v)
+            max_timestamp = max(max_timestamp, max_v)
+        if self.data_iperf_receiver is not None:
+            min_v, max_v = self.data_iperf_receiver.get_timestamp_range()
+            min_timestamp = min(min_timestamp, min_v)
+            max_timestamp = max(max_timestamp, max_v)
+        return min_timestamp, max_timestamp
+
+    def get_reconfiguration_times(self) -> list[tuple[str, pd.Timestamp]]:
+        reconfig_times = []
+        min_ts, max_ts = self.get_timestamp_range()
+
+        if self.data_dishy_sender is not None:
+            for t in self.data_dishy_sender.switch_timestamps:
+                if t < min_ts or t > max_ts:
+                    continue
+                reconfig_times.append(("sender", t))
+        if self.data_dishy_receiver is not None:
+            for t in self.data_dishy_receiver.switch_timestamps:
+                if t < min_ts or t > max_ts:
+                    continue
+                reconfig_times.append(("receiver", t))
+        return reconfig_times
+
+    def get_congestion_states(self) -> pd.DataFrame | None:
+        if self.data_parquet_sender is not None:
+            states = self.data_parquet_sender.get_congestion_states()
+            if states is not None:
+                return states
+        return None
+
+
+    def __load_dishy_files(self):
+        sender_path = os.path.join(self.folder_path, "dishy_sender.json")
+        receiver_path = os.path.join(self.folder_path, "dishy_receiver.json")
+        if os.path.exists(sender_path):
+            self.data_dishy_sender = dishy_from_file(sender_path)
+        if os.path.exists(receiver_path):
+            self.data_dishy_receiver = dishy_from_file(receiver_path)
+
+    def __load_iperf_files(self):
+        receiver_path = os.path.join(self.folder_path, "iperf-receiver.json")
+        if os.path.exists(receiver_path):
+            self.data_iperf_receiver = iperf_from_file(receiver_path)
+        sender_path = os.path.join(self.folder_path, "iperf-sender.json")
+        if os.path.exists(sender_path):
+            self.data_iperf_sender = iperf_from_file(sender_path)
+
+    def __load_irtt_files(self):
+        path = os.path.join(self.folder_path, "irtt-sender.json")
+        if os.path.exists(path):
+            self.data_irtt = irtt_from_file(path)
+
+    def __load_parquet_files(self):
+        sender_path = os.path.join(self.folder_path, "sender.parquet")
+        receiver_path = os.path.join(self.folder_path, "receiver.parquet")
+        if os.path.exists(sender_path):
+            self.data_parquet_sender = parquet_from_file(sender_path)
+        if os.path.exists(receiver_path):
+            self.data_parquet_receiver = parquet_from_file(receiver_path)

@@ -187,7 +187,7 @@ def main():
             children = [os.path.join(root, name) for name in os.listdir(root)]
             child_files = [p for p in children if os.path.isfile(p)]
             child_dirs = sorted([p for p in children if os.path.isdir(p)])
-            if len(child_files) == 0 and len(child_dirs) > 0:
+            if (len(child_files) == 0 or (len(child_files) == 1) and child_files[0].endswith("graph.html")) and len(child_dirs) > 0:
                 folders = child_dirs
         except Exception:
             pass

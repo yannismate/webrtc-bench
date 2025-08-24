@@ -1,339 +1,279 @@
-import os
-import pandas as pd
-import pyarrow.parquet as pq
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import plotly.express as px
-import plotly.figure_factory as ff
 import argparse
-import json
-import math
-import datetime
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+from matplotlib.widgets import Slider
+from matplotlib.axes import Axes
+from matplotlib.lines import Line2D
 
-parser = argparse.ArgumentParser(description="Analyze and graph WebRTC stats from a results folder.")
-parser.add_argument("path", help="Path to the results")
-parser.add_argument("--save", action="store_true", help="Save the graph as a PNG file instead of displaying it")
-parser.add_argument("--resample-ms", type=int, default=200, help="Interval for resampling rate graphs in ms")
-args = parser.parse_args()
+from loaders.measurement import Measurement
 
-results_folder_path = args.path
-save_graph = args.save
-resample_ms = args.resample_ms
-resampling_multiplier = 1000/resample_ms
+# Keep references to widgets/figures to avoid garbage collection breaking interactivity
+_WIDGETS_KEEPALIVE: list = []
 
-def load_parquet(parquet_file_path):
-    table = pq.read_pandas(parquet_file_path)
-    df = table.to_pandas()
-    df = pd.json_normalize(df.to_dict(orient='records'))
 
-    for key in df.columns.values:
-        if df[key].dtype == object and not "." in key:
-            df.drop(key, axis='columns', inplace=True)
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("path", help="Path to the results")
+    parser.add_argument("--resample-ms", type=int, default=200, help="Interval for resampling rate graphs in ms")
+    parser.add_argument("--dishy-trail", type=int, default=15, help="Trail length in seconds for Dishy position heatmap")
+    args = parser.parse_args()
 
-    # Remove odd lines at beginning of recording with old timestamps
-    one_year_ago = (pd.Timestamp.now(tz="UTC") - pd.DateOffset(years=1))
-    df = df[df["Timestamp"] >= one_year_ago]
+    ms = Measurement(args.path)
+    ms.load_files()
 
-    # Drop rows at the beginning with 0 packets sent/received
-    if "OutboundRTP.PacketsSent" in df.columns:
-        df = df.loc[df["OutboundRTP.PacketsSent"].ne(0).cummax()]
-    if "InboundRTP.PacketsReceived" in df.columns:
-        df = df.loc[df["InboundRTP.PacketsReceived"].ne(0).cummax()]
+    send_br = ms.get_send_bitrate_kbps(args.resample_ms)
+    recv_br = ms.get_recv_bitrate_kbps(args.resample_ms)
+    rtt = ms.get_rtt_ms()
+    jitter = ms.get_jitter_ms()
+    reconfig_times = ms.get_reconfiguration_times()
+    cong_br = ms.get_congestion_bitrates()
+    delay_estimate = ms.get_delay_estimate_ms()
+    feedback_interval = ms.get_feedback_interval_ms()
+    # Fetch congestion states (enum-like) if present
+    cong_states = ms.get_congestion_states()
+    # Adjust number of plots if delay_estimate or cong_states are available
+    num_plots = 2 \
+        + (1 if jitter is not None else 0) \
+        + (1 if cong_br is not None else 0) \
+        + (1 if delay_estimate is not None else 0) \
+        + (1 if feedback_interval is not None else 0) \
+        + (1 if (cong_states is not None and not cong_states.empty) else 0)
+    heights = {2: 8, 3: 10, 4: 12, 5: 14, 6: 16}
+    fig, axes = plt.subplots(num_plots, 1, sharex=True, figsize=(10, heights.get(num_plots, 12)))
+    axes_list: list[Axes] = np.atleast_1d(axes).ravel().tolist()  # type: ignore[assignment]
+    ax1: Axes = axes_list[0]
+    ax2: Axes = axes_list[1]
+    idx = 2
+    ax3: Axes | None = None
+    ax_cong: Axes | None = None
+    ax_delay: Axes | None = None
+    ax_feedback_interval: Axes | None = None
+    ax_states: Axes | None = None
+    if jitter is not None and idx < len(axes_list):
+        ax3 = axes_list[idx]
+        idx += 1
+    if cong_br is not None and idx < len(axes_list):
+        ax_cong = axes_list[idx]
+        idx += 1
+    if delay_estimate is not None and idx < len(axes_list):
+        ax_delay = axes_list[idx]
+        idx += 1
+    if feedback_interval is not None and idx < len(axes_list):
+        ax_feedback_interval = axes_list[idx]
+        idx += 1
+    if (cong_states is not None and not cong_states.empty) and idx < len(axes_list):
+        ax_states = axes_list[idx]
 
-    # Remove duplicate stat rows with same timestamp
-    df.drop_duplicates(subset=['Timestamp'], keep='first', inplace=True)
-    df.set_index("Timestamp", inplace=True)
-    df.sort_index(inplace=True)
-    return df
+    # Plot bitrates
+    ax1.plot(send_br.index, send_br.values, label='Send Bitrate (kbps)')
+    ax1.plot(recv_br.index, recv_br.values, label='Recv Bitrate (kbps)')
 
-def load_sat_switches(dishy_json_path):
-    with open(dishy_json_path) as dishy_json_file:
-        loaded_json = json.load(dishy_json_file)
-    num_rows = loaded_json["NumRows"]
+    # Plot RTT (if available)
+    if rtt is not None:
+        ax2.plot(rtt.index, rtt.values, label='RTT (ms)', color='tab:red')
 
-    def get_row_col(index):
-        row = index // num_rows
-        column = index % num_rows
-        return (row, column)
+    # Plot Jitter (if available)
+    if jitter is not None and ax3 is not None:
+        ax3.plot(jitter.index, jitter.values, label='Jitter (ms)', color='tab:purple')
 
-    def get_distance(xa, ya, xb, yb):
-        return math.sqrt((xa-xb)**2 + (ya-yb)**2)
+    # Plot congestion bitrates (if available)
+    if cong_br is not None and ax_cong is not None and not cong_br.empty:
+        palette = sns.color_palette(n_colors=len(cong_br.columns))
+        for i, col in enumerate(cong_br.columns):
+            ax_cong.plot(cong_br.index, cong_br[col].values, label=col, color=palette[i % len(palette)])
+        ax_cong.set_xlabel('Time')
+        ax_cong.set_ylabel('Bitrate (kbps)')
+        ax_cong.set_title('Congestion Bitrates Over Time')
+        ax_cong.grid(True)
+        ax_cong.legend()
 
-    switch_timestamps = []
-    known_snr = []
-    latest_location_row = 0
-    latest_location_col = 0
+    # Plot delay estimate (if available)
+    if delay_estimate is not None and ax_delay is not None:
+        ax_delay.plot(delay_estimate.index, delay_estimate.values, label='Delay Estimate (ms)', color='tab:blue')
+        ax_delay.set_xlabel('Time')
+        ax_delay.set_ylabel('Delay Estimate (ms)')
+        ax_delay.set_title('Delay Estimate Over Time')
+        ax_delay.grid(True)
+        ax_delay.legend()
 
-    for obstruction_entry in loaded_json["ObstructionData"]:
-        for snr in obstruction_entry["SNR"]:
-            snr_idx = snr["Index"]
-            if snr_idx in known_snr:
+    if feedback_interval is not None and ax_feedback_interval is not None:
+        ax_feedback_interval.plot(feedback_interval.index, feedback_interval.values, label='Feedback interval (ms)', color='tab:blue')
+        ax_feedback_interval.set_xlabel('Time')
+        ax_feedback_interval.set_ylabel('Feedback interval (ms)')
+        ax_feedback_interval.set_title('Feedback interval Over Time')
+        ax_feedback_interval.grid(True)
+        ax_feedback_interval.legend()
+
+    # Plot congestion states (if available) as colored timelines per column
+    if cong_states is not None and ax_states is not None and not cong_states.empty:
+        cols = list(cong_states.columns)
+        y_positions = np.arange(len(cols))
+        # Determine global time range across measurement to close last segment
+        global_start, global_end = ms.get_timestamp_range()
+        # Build a global color map across all unique states (excluding NaN)
+        unique_states_global = []
+        for col in cols:
+            unique_states_global.extend(cong_states[col].dropna().astype(str).unique().tolist())
+        # Preserve order of first appearance
+        seen = set()
+        unique_states_global = [x for x in unique_states_global if not (x in seen or seen.add(x))]
+        colors = sns.color_palette("tab20", n_colors=len(unique_states_global) if unique_states_global else 1)
+        color_map = {st: colors[j % len(colors)] for j, st in enumerate(unique_states_global)}
+        for i, col in enumerate(cols):
+            s = cong_states[col].dropna()
+            if s.empty:
                 continue
-            known_snr.append(snr_idx)
-            known_snr = known_snr[-20:]
-            row, col = get_row_col(snr_idx)
-            distance = get_distance(latest_location_row, latest_location_col, row, col)
-            latest_location_row = row
-            latest_location_col = col
-            if distance > 3:
-                switch_timestamps.append(datetime.datetime.fromisoformat(obstruction_entry["Time"]))
+            # Use string labels for stable color mapping and comparisons
+            s_str = s.astype(str)
+            # Build contiguous segments of identical state
+            prev_state = s_str.iloc[0]
+            seg_start = s_str.index[0]
+            for t, st in zip(s_str.index[1:], s_str.iloc[1:]):
+                if st != prev_state:
+                    # Draw segment from seg_start to t
+                    ax_states.plot([seg_start, t], [i, i], color=color_map.get(prev_state, 'k'), linewidth=6, solid_capstyle='butt')
+                    seg_start = t
+                    prev_state = st
+            # Close final segment to global_end
+            t_end = max(seg_start, global_end)
+            ax_states.plot([seg_start, t_end], [i, i], color=color_map.get(prev_state, 'k'), linewidth=6, solid_capstyle='butt')
+        ax_states.set_yticks(y_positions)
+        ax_states.set_yticklabels(cols)
+        ax_states.set_ylim(-1, len(cols))
+        ax_states.set_xlabel('Time')
+        ax_states.set_ylabel('States')
+        ax_states.set_title('Congestion States Over Time')
+        ax_states.grid(True, axis='x')
+        # Add legend mapping colors to state labels (if any)
+        if unique_states_global:
+            handles = [Line2D([0], [0], color=color_map[st], lw=6) for st in unique_states_global]
+            ax_states.legend(handles, unique_states_global, title='States', loc='upper right', fontsize='small')
 
-    return switch_timestamps[1:]
+    # Plot reconfigurations on all axes
+    role_colors = {"sender": "tab:orange", "receiver": "tab:green"}
+    shown_roles = set()
+    all_axes: list[Axes] = [ax1, ax2]
+    if ax3 is not None:
+        all_axes.append(ax3)
+    if ax_cong is not None:
+        all_axes.append(ax_cong)
+    if ax_delay is not None:
+        all_axes.append(ax_delay)
+    if ax_feedback_interval is not None:
+        all_axes.append(ax_feedback_interval)
+    if ax_states is not None:
+        all_axes.append(ax_states)
+    for role, ts in reconfig_times:
+        label = f"Reconfig ({role})" if role not in shown_roles else None
+        for i, ax in enumerate(all_axes):
+            # Always use ts here to avoid truncating nanoseconds
+            ax.axvline(ts, color=role_colors.get(role, "k"), linestyle=":", linewidth=1, label=label if i == 0 else None)
+        shown_roles.add(role)
 
-sender_df = load_parquet(os.path.join(results_folder_path, "sender.parquet"))
-receiver_df = load_parquet(os.path.join(results_folder_path, "receiver.parquet"))
+    ax1.set_ylabel('Bitrate (kbps)')
+    ax1.set_title('Bitrate Over Time')
+    ax1.grid(True)
+    ax1.legend()
 
-sat_switches = []
-dishy_sender_path = os.path.join(results_folder_path, "dishy_sender.json")
-dishy_sender_path = os.path.join(results_folder_path, "dishy_receiver.json")
-if os.path.exists(dishy_sender_path):
-    sat_switches = load_sat_switches(dishy_sender_path)
-elif os.path.exists(dishy_receiver_path):
-    sat_switches = load_sat_switches(dishy_receiver_path)
+    ax2.set_xlabel('Time')
+    ax2.set_ylabel('RTT (ms)')
+    ax2.set_title('RTT Over Time')
+    ax2.grid(True)
+    if rtt is not None:
+        ax2.legend()
 
-has_gcc_stats = 'GCCStats.State' in sender_df
-has_scream_stats = 'ScreamStats.TargetBitrate' in sender_df
+    if jitter is not None and ax3 is not None:
+        ax3.set_xlabel('Time')
+        ax3.set_ylabel('Jitter (ms)')
+        ax3.set_title('Jitter Over Time')
+        ax3.grid(True)
+        ax3.legend()
 
-num_rows = 3
-if has_gcc_stats:
-    num_rows = 6
-if has_scream_stats:
-    num_rows = 5
+    # Dishy 2D heatmap with slider (if available)
+    def create_dishy_imshow(dishy_data, title_prefix: str):
+        if dishy_data is None:
+            return
+        positions = getattr(dishy_data, 'positions', None)
+        if positions is None or getattr(positions, 'empty', True):
+            return
+        num_rows = getattr(dishy_data, 'num_rows', None)
+        num_cols = getattr(dishy_data, 'num_columns', None)
+        if not isinstance(num_rows, int) or not isinstance(num_cols, int):
+            return
+        trail = max(1, int(args.dishy_trail))
 
-fig = make_subplots(rows=num_rows, cols=1, shared_xaxes=True, vertical_spacing=0.03)
+        # Prepare time axis in seconds since first observation
+        times = positions['time']
+        # Ensure sorted by time (loader already does this, but keep safe)
+        positions_sorted = positions.sort_values('time').reset_index(drop=True)
+        times = positions_sorted['time']
+        rows_arr = positions_sorted['row'].to_numpy(dtype=int)
+        cols_arr = positions_sorted['col'].to_numpy(dtype=int)
+        t0 = times.iloc[0]
+        times_sec = (times - t0).dt.total_seconds().to_numpy()
+        t_max = float(times_sec[-1]) if len(times_sec) > 0 else 0.0
+        # Slider requires valmin < valmax; if only one point, make a tiny range
+        if t_max <= 0.0:
+            t_max = 1.0
 
-fig.update_layout(title_text="WebRTC stats " + results_folder_path)
+        # Separate figure for the heatmap and a slider below
+        fig_hm, ax_hm = plt.subplots(figsize=(6, 6))
+        slider_ax = fig_hm.add_axes((0.15, 0.05, 0.7, 0.03))
 
-# Throughput (smoothed to seconds)
-sender_rate = sender_df["OutboundRTP.BytesSent"].resample(f"{resample_ms}ms").max().diff().fillna(0).clip(lower=0)
-sender_rate = (sender_rate / 1000)*8*resampling_multiplier
+        def compute_heat(t_s: float) -> np.ndarray:
+            heat = np.zeros((num_rows, num_cols), dtype=float)
+            start_t = max(0.0, t_s - float(trail))
+            # Mask rows within trailing window [start_t, t_s]
+            mask = (times_sec >= start_t) & (times_sec <= t_s)
+            idxs = np.nonzero(mask)[0]
+            if idxs.size == 0:
+                return heat
+            # Linear weight from oldest (0) to newest (1) within the window
+            denom = max(t_s - start_t, 1e-9)
+            for k in idxs:
+                ri = rows_arr[k]
+                ci = cols_arr[k]
+                if 0 <= ri < num_rows and 0 <= ci < num_cols:
+                    w = (times_sec[k] - start_t) / denom
+                    if w > heat[ri, ci]:
+                        heat[ri, ci] = w
+            return heat
 
-receiver_rate = receiver_df["InboundRTP.BytesReceived"].resample(f"{resample_ms}ms").max().diff().fillna(0).clip(lower=0)
-receiver_rate = (receiver_rate / 1000)*8*resampling_multiplier
-
-packets_receive_rate = receiver_df["InboundRTP.PacketsReceived"].resample(f"{resample_ms}ms").max().diff().fillna(0).clip(lower=0)
-packets_receive_rate = packets_receive_rate
-
-packets_lost_rate = receiver_df["InboundRTP.PacketsLost"].resample(f"{resample_ms}ms").max().diff().fillna(0).clip(lower=0)
-packets_lost_rate = packets_lost_rate
-
-loss_rate = packets_lost_rate / (packets_receive_rate + packets_lost_rate)
-
-receiver_rate_rtx = receiver_df["InboundRTP.RetransmittedBytesReceived"].resample(f"{resample_ms}ms").max().diff().fillna(0).clip(lower=0)
-receiver_rate_rtx = (receiver_rate_rtx / 1000)*8*resampling_multiplier
-
-fig.add_trace(
-    go.Scatter(
-        x=sender_rate.index,
-        y=sender_rate,
-        mode="lines",
-        name="Outbound Kb/s",
-        line=dict(color="blue"),
-    ),
-    row=1,
-    col=1,
-)
-
-fig.add_trace(
-    go.Scatter(
-        x=receiver_rate.index,
-        y=receiver_rate,
-        mode="lines",
-        name="Inbound Kb/s",
-        line=dict(color="green"),
-    ),
-    row=1,
-    col=1,
-)
-
-fig.add_trace(
-    go.Scatter(
-        x=receiver_rate_rtx.index,
-        y=receiver_rate_rtx,
-        mode="lines",
-        name="Inbound RTX Kb/s",
-        line=dict(color="yellow"),
-    ),
-    row=1,
-    col=1,
-)
-
-# Loss
-fig.add_trace(
-    go.Scatter(
-        x=loss_rate.index,
-        y=loss_rate,
-        mode="lines",
-        name="Loss %",
-        line=dict(color="red"),
-    ),
-    row=2,
-    col=1,
-)
-
-# RTT/Jitter
-fig.add_trace(
-    go.Scatter(
-        x=sender_df.index,
-        y=sender_df["OutboundRTP.RoundTripTime"]*1000,
-        mode="lines",
-        name="RTT ms",
-        line=dict(color="green"),
-    ),
-    row=3,
-    col=1,
-)
-
-# GCC Stats
-if 'GCCStats.State' in sender_df:
-    fig.add_trace(
-        go.Scatter(
-            x=sender_df.index,
-            y=sender_df["GCCStats.LossTargetBitrate"]/1000,
-            mode="lines",
-            name="GCC Loss Target Bitrate KB/s",
-            line=dict(color="orange"),
-        ),
-        row=4,
-        col=1,
-    )
-
-    fig.add_trace(
-        go.Scatter(
-            x=sender_df.index,
-            y=sender_df["GCCStats.DelayTargetBitrate"]/1000,
-            mode="lines",
-            name="GCC Delay Target Bitrate KB/s",
-            line=dict(color="purple"),
-        ),
-        row=4,
-        col=1,
-    )
-
-    fig.add_trace(
-        go.Scatter(
-            x=sender_df.index,
-            y=sender_df["GCCStats.DelayEstimate"],
-            mode="lines",
-            name="GCC Delay Estimate ms",
-            line=dict(color="black"),
-        ),
-        row=5,
-        col=1,
-    )
-
-    # prepare color maps
-    usage_states = sender_df["GCCStats.Usage"].dropna().unique()
-    usage_colors = px.colors.qualitative.Plotly
-    usage_color_map = {s: usage_colors[i % len(usage_colors)] for i, s in enumerate(usage_states)}
-    state_states = sender_df["GCCStats.State"].dropna().unique()
-    state_colors = px.colors.qualitative.Pastel
-    state_color_map = {s: state_colors[i % len(state_colors)] for i, s in enumerate(state_states)}
-
-    # build Gantt for GCCStats.Usage
-    usage = sender_df["GCCStats.Usage"]
-    df_usage_segments = []
-    curr_state, curr_start = None, None
-    for t, s in usage.items():
-        if pd.isna(s): continue
-        if s != curr_state:
-            if curr_state is not None:
-                df_usage_segments.append(dict(Task="Usage", Start=curr_start, Finish=t, Resource=curr_state))
-            curr_state, curr_start = s, t
-    if curr_state is not None:
-        df_usage_segments.append(dict(Task="Usage", Start=curr_start, Finish=usage.index[-1], Resource=curr_state))
-
-    # build Gantt for GCCStats.State
-    state = sender_df["GCCStats.State"]
-    df_state_segments = []
-    curr_state, curr_start = None, None
-    for t, s in state.items():
-        if pd.isna(s): continue
-        if s != curr_state:
-            if curr_state is not None:
-                df_state_segments.append(dict(Task="State", Start=curr_start, Finish=t, Resource=curr_state))
-            curr_state, curr_start = s, t
-    if curr_state is not None:
-        df_state_segments.append(dict(Task="State", Start=curr_start, Finish=state.index[-1], Resource=curr_state))
-
-    usage_gantt = ff.create_gantt(
-            df_usage_segments + df_state_segments,
-            group_tasks=True,
-            colors=usage_color_map | state_color_map,
-            index_col='Resource',
+        init_t = float(times_sec[-1]) if len(times_sec) > 0 else 0.0
+        img = ax_hm.imshow(
+            compute_heat(init_t),
+            cmap='magma', vmin=0.0, vmax=1.0, interpolation='nearest', origin='upper'
         )
-    for trace in usage_gantt.data:
-        fig.add_trace(trace, row=6, col=1)
+        ax_hm.set_title(f"{title_prefix} Dishy positions (trail={trail}s)")
+        ax_hm.set_xlabel('Column')
+        ax_hm.set_ylabel('Row')
+        ax_hm.set_xlim(-0.5, num_cols - 0.5)
+        ax_hm.set_ylim(num_rows - 0.5, -0.5)
+        ax_hm.grid(False)
+        cbar = fig_hm.colorbar(img, ax=ax_hm, fraction=0.046, pad=0.04)
+        cbar.set_label('Recency (1 = current)')
 
-    # build Gantt for GCCStats.DetectedReconfiguration
-    if 'GCCStats.DetectedReconfiguration' in sender_df:
-        detected_reconfiguration = sender_df["GCCStats.DetectedReconfiguration"]
-        df_reconfig_segments = []
-        curr_state, curr_start = None, None
-        for t, s in detected_reconfiguration.items():
-            if pd.isna(s): continue
-            if s != curr_state:
-                if curr_state is not None:
-                    df_reconfig_segments.append(dict(Task="DetectedReconfiguration", Start=curr_start, Finish=t, Resource=str(curr_state)))
-                curr_state, curr_start = s, t
-        if curr_state is not None:
-            df_reconfig_segments.append(dict(Task="DetectedReconfiguration", Start=curr_start, Finish=detected_reconfiguration.index[-1], Resource=str(curr_state)))
+        slider = Slider(ax=slider_ax, label='Time (s)', valmin=0.0, valmax=t_max, valinit=init_t)
 
-        # Add Gantt chart for DetectedReconfiguration
-        reconfig_states = detected_reconfiguration.dropna().unique()
-        reconfig_colors = px.colors.qualitative.Dark24
-        reconfig_color_map = {str(s): reconfig_colors[i % len(reconfig_colors)] for i, s in enumerate(reconfig_states)}
+        def on_change(_):
+            t_s = float(slider.val)
+            img.set_data(compute_heat(t_s))
+            fig_hm.canvas.draw_idle()
 
-        reconfig_gantt = ff.create_gantt(
-            df_reconfig_segments,
-            group_tasks=True,
-            colors=reconfig_color_map,
-            index_col='Resource',
-        )
-        for trace in reconfig_gantt.data:
-            fig.add_trace(trace, row=6, col=1)
+        slider.on_changed(on_change)
 
-# SCReAM Stats
-if has_scream_stats:
-    fig.add_trace(
-        go.Scatter(
-            x=sender_df.index,
-            y=sender_df["ScreamStats.CWND"],
-            mode="lines",
-            name="SCReAM CWND",
-            line=dict(color="orange"),
-        ),
-        row=4,
-        col=1,
-    )
+        # Keep strong references around to avoid GC breaking callbacks
+        _WIDGETS_KEEPALIVE.extend([fig_hm, ax_hm, img, slider])
 
-    fig.add_trace(
-        go.Scatter(
-            x=sender_df.index,
-            y=sender_df["ScreamStats.BytesInFlightLog"],
-            mode="lines",
-            name="SCReAM Bytes in flight",
-            line=dict(color="purple"),
-        ),
-        row=4,
-        col=1,
-    )
+    # Prefer sender; also show receiver if available
+    if getattr(ms, 'data_dishy_sender', None) is not None:
+        create_dishy_imshow(ms.data_dishy_sender, title_prefix='Sender')
+    if getattr(ms, 'data_dishy_receiver', None) is not None:
+        create_dishy_imshow(ms.data_dishy_receiver, title_prefix='Receiver')
 
-    fig.add_trace(
-        go.Scatter(
-            x=sender_df.index,
-            y=sender_df["ScreamStats.QueueDelay"]*1000,
-            mode="lines",
-            name="SCReAM Queue Delay ms",
-            line=dict(color="black"),
-        ),
-        row=5,
-        col=1,
-    )
+    fig.tight_layout()
+    plt.show()
 
-# Add vertical lines for satellite switches
-for switch_time in sat_switches:
-    if sender_df.index.min() <= switch_time <= sender_df.index.max():
-        fig.add_vline(x=switch_time, line_dash="dot", line_color="gray", opacity=0.5)
-
-fig.show()
+if __name__ == "__main__":
+    main()
