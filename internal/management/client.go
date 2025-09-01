@@ -46,6 +46,8 @@ type client struct {
 	dishyObstructionData        *obstructionData
 	dishyStopDataCollectionChan chan bool
 	dishyDataCollectionStopped  sync.WaitGroup
+
+	runningProcesses []*os.Process
 }
 
 type obstructionData struct {
@@ -189,7 +191,7 @@ func (c *client) Start() {
 
 								if cmds, ok := (*c.CurrentCaseConfig.ConfigurationCommands)["t"+strconv.Itoa(secondsPassed)]; ok {
 									for _, cmd := range cmds {
-										executeCommand(cmd)
+										c.executeCommand(cmd)
 									}
 								}
 							}
@@ -220,7 +222,7 @@ func (c *client) Start() {
 				if c.CurrentCaseConfig.ConfigurationCommands != nil {
 					if cmds, ok := (*c.CurrentCaseConfig.ConfigurationCommands)["post"]; ok {
 						for _, cmd := range cmds {
-							executeCommand(cmd)
+							c.executeCommand(cmd)
 						}
 					}
 				}
@@ -259,6 +261,21 @@ func (c *client) Start() {
 					})
 				}
 				log.Debug().Msgf("Sent case results message.")
+
+				for _, p := range c.runningProcesses {
+					if p.Pid == 0 {
+						continue
+					}
+					process, err := os.FindProcess(p.Pid)
+					if err != nil || process == nil {
+						continue
+					}
+					log.Warn().Msgf("Case process still running with PID %d, trying to kill...", p.Pid)
+					err = process.Kill()
+					if err != nil {
+						log.Error().Err(err).Msgf("Killing PID %d failed", p.Pid)
+					}
+				}
 
 				c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateRegistered})
 			case MessageTypePeerSignal:
@@ -459,7 +476,7 @@ func (c *client) configureCase(configMsg MessageConfigureClient) {
 	if configMsg.Config.ConfigurationCommands != nil {
 		if cmds, ok := (*configMsg.Config.ConfigurationCommands)["pre"]; ok {
 			for _, cmd := range cmds {
-				executeCommand(cmd)
+				c.executeCommand(cmd)
 			}
 		}
 	}
@@ -476,7 +493,7 @@ func (c *client) configureCase(configMsg MessageConfigureClient) {
 	log.Info().Msgf("Successfully configured case %s", configMsg.CaseType)
 }
 
-func executeCommand(cmd string) {
+func (c *client) executeCommand(cmd string) {
 	ignoreErr := strings.HasPrefix(cmd, "!")
 	runAsync := strings.HasPrefix(cmd, "~")
 	cmd = strings.TrimPrefix(cmd, "!")
@@ -484,6 +501,7 @@ func executeCommand(cmd string) {
 	cmdParts := strings.Split(cmd, " ")
 	goCmd := exec.Command(cmdParts[0], cmdParts[1:]...)
 	if runAsync {
+		log.Info().Msgf("Executing command in background: %s", cmd)
 		stdout, err := goCmd.StdoutPipe()
 		if err != nil {
 			log.Fatal().Err(err).Str("command", goCmd.String()).Msg("Error getting command stdout")
@@ -492,14 +510,35 @@ func executeCommand(cmd string) {
 		stdoutReader := bufio.NewScanner(stdout)
 		go func() {
 			for stdoutReader.Scan() {
-				log.Debug().Msgf("Command stdout: %s", stdoutReader.Text())
+				log.Debug().Msgf("[BackgroundCommand] stdout: %s", stdoutReader.Text())
+			}
+			_ = goCmd.Wait()
+			for i, proc := range c.runningProcesses {
+				if proc.Pid == goCmd.Process.Pid {
+					c.runningProcesses = append(c.runningProcesses[:i], c.runningProcesses[i+1:]...)
+					break
+				}
+			}
+
+		}()
+		stderr, err := goCmd.StderrPipe()
+		if err != nil {
+			log.Fatal().Err(err).Str("command", goCmd.String()).Msg("Error getting command stderr")
+			return
+		}
+		stderrReader := bufio.NewScanner(stderr)
+		go func() {
+			for stderrReader.Scan() {
+				log.Warn().Msgf("[BackgroundCommand] stderr: %s", stderrReader.Text())
 			}
 		}()
+
 		err = goCmd.Start()
 		if err != nil {
 			log.Fatal().Err(err).Str("command", goCmd.String()).Msg("Error executing command")
 			return
 		}
+		c.runningProcesses = append(c.runningProcesses, goCmd.Process)
 		return
 	}
 	err := goCmd.Run()

@@ -112,6 +112,11 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 		detectionEnabled = true
 	}
 
+	guardEnabled := false
+	if val, ok := config.AdditionalConfig["enable_guard"]; ok && val == "true" {
+		guardEnabled = true
+	}
+
 	realEncodingEnabled := false
 	if val, ok := config.AdditionalConfig["use_real_codec"]; ok && val == "true" {
 		realEncodingEnabled = true
@@ -137,6 +142,7 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 		"--bitrate", bitrateStr, "--ice", config.ICEServers[0],
 		"--stat-interval", strconv.Itoa(int(time.Duration(config.StatInterval).Milliseconds())),
 		"--enable-detection", strconv.FormatBool(detectionEnabled),
+		"--enable-guard", strconv.FormatBool(guardEnabled),
 		"--use-real-codec", strconv.FormatBool(realEncodingEnabled),
 		"--use-ffmpeg-source", strconv.FormatBool(ffmpegSourceEnabled),
 		"--ffmpeg-source-file", ffmpegSourceFile,
@@ -168,6 +174,8 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 
 	go func() {
 		var latestGCCStats *results.GCCStats
+		var guardEngaged *bool
+		var msSinceLastReport *int
 		for c.stdoutReader.Scan() {
 			if c.isStopping {
 				return
@@ -228,7 +236,10 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 						}
 
 					}
-
+					if latestGCCStats != nil {
+						latestGCCStats.MsSinceLastReport = msSinceLastReport
+						latestGCCStats.GuardEngaged = guardEngaged
+					}
 					statLine := convertSignalsToStatLine(inboundRTP, outboundRTP, remoteInboundRTP, remoteOutboundRTP, latestGCCStats)
 					c.statCollector.RecordRow(statLine)
 				} else if strings.HasPrefix(line, "SIGNAL/GCC/") {
@@ -245,6 +256,28 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 
 					converted := convertSignalToGCCStats(stat)
 					latestGCCStats = &converted
+				} else if strings.HasPrefix(line, "SIGNAL/GUARD/") {
+					statString := line[13:]
+					parts := strings.Split(statString, ";")
+					if len(parts) != 2 {
+						log.Error().Msgf("Error parsing signal guard stats: %s", statString)
+						continue
+					}
+					newMsSinceLastReport, err := strconv.Atoi(parts[0])
+					if err != nil {
+						log.Error().Msgf("Error parsing signal guard ms: %s", parts[0])
+						continue
+					}
+
+					isEngaged, err := strconv.ParseBool(parts[1])
+					if err != nil {
+						log.Error().Msgf("Error parsing signal guard staus: %s", parts[1])
+					}
+
+					if latestGCCStats != nil {
+						msSinceLastReport = &newMsSinceLastReport
+						guardEngaged = &isEngaged
+					}
 				} else {
 					log.Error().Msgf("Unknown signal: %s", line)
 				}

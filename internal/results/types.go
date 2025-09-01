@@ -54,6 +54,8 @@ type GCCStats struct {
 	Usage                   string
 	State                   string
 	DetectedReconfiguration *bool
+	MsSinceLastReport       *int
+	GuardEngaged            *bool
 }
 
 type ScreamStats struct {
