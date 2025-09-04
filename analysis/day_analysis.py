@@ -30,18 +30,12 @@ def extract_quantiles(measurement: Measurement, resample_ms: int) -> dict:
             'min': q[0.01], 'q1': q[0.25], 'median': q[0.5], 'q3': q[0.75], 'max': q[0.99]
         }
     # Loss (fraction)
-    # Try to estimate loss from receiver parquet if available
-    if hasattr(measurement, 'data_parquet_receiver') and measurement.data_parquet_receiver is not None:
-        df = measurement.data_parquet_receiver.data
-        if 'InboundRTP.PacketsReceived' in df.columns and 'InboundRTP.PacketsLost' in df.columns:
-            packets_receive_rate = df['InboundRTP.PacketsReceived'].resample(f"{resample_ms}ms").max().diff().fillna(0).clip(lower=0)
-            packets_lost_rate = df['InboundRTP.PacketsLost'].resample(f"{resample_ms}ms").max().diff().fillna(0).clip(lower=0)
-            loss_rate = packets_lost_rate / (packets_receive_rate + packets_lost_rate)
-            loss_rate = loss_rate.fillna(0)
-            q = loss_rate.quantile(QUANTILE_PARTS)
-            quantiles['loss'] = {
-                'min': q[0.01], 'q1': q[0.25], 'median': q[0.5], 'q3': q[0.75], 'max': q[0.99]
-            }
+    loss = measurement.get_loss_rate()
+    if loss is not None and not loss.empty:
+        q = loss.quantile(QUANTILE_PARTS)
+        quantiles['loss'] = {
+            'min': q[0.01], 'q1': q[0.25], 'median': q[0.5], 'q3': q[0.75], 'max': q[0.99]
+        }
     return quantiles
 
 

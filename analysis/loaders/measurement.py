@@ -108,6 +108,18 @@ class Measurement:
                 return jitter
         return None
 
+    def get_loss_rate(self) -> pd.Series | None:
+        if self.data_parquet_receiver is not None:
+            loss = self.data_parquet_receiver.get_loss_rate()
+            if loss is not None:
+                return loss
+
+        if self.data_iperf_receiver is not None:
+            loss = self.data_iperf_receiver.get_loss_rate()
+            if loss is not None:
+                return loss
+        return None
+
     def get_congestion_bitrates(self) -> pd.DataFrame | None:
         if self.data_parquet_sender is not None:
             cong = self.data_parquet_sender.get_congestion_bitrates()

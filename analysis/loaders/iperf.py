@@ -39,6 +39,15 @@ class IPerfData:
         series.name = "recv_kbps"
         return series
 
+    def get_loss_rate(self) -> pd.Series | None:
+        if self.intervals.empty or 'lost_percent' not in self.intervals:
+            return None
+
+        series = self.intervals.set_index('timestamp').sort_index()['lost_percent'] / 100.0
+        series.index.name = 'Timestamp'
+        series.name = "loss_rate"
+        return series
+
     def get_timestamp_range(self) -> tuple[pd.Timestamp, pd.Timestamp]:
         min_timestamp = self.intervals['timestamp'].min()
         max_timestamp = self.intervals['timestamp'].max()

@@ -54,6 +54,17 @@ class ParquetData:
         receiver_rate.name = "recv_kbps"
         return receiver_rate
 
+    def get_loss_rate(self) -> pd.Series | None:
+        if "InboundRTP.PacketsLost" in self.data and "InboundRTP.PacketsReceived" in self.data:
+            packets_lost = self.data["InboundRTP.PacketsLost"].resample("200ms").max().diff().fillna(0).clip(lower=0)
+            packets_received = self.data["InboundRTP.PacketsReceived"].resample("200ms").max().diff().fillna(0).clip(lower=0)
+            total_packets = packets_lost + packets_received
+            loss_rate = (packets_lost / total_packets).replace([float('inf'), -float('inf')], float('nan')).fillna(0)
+            loss_rate.index.name = 'Timestamp'
+            loss_rate.name = "loss_rate"
+            return loss_rate
+        return None
+
     def get_rtt_ms(self) -> pd.Series | None:
         if "OutboundRTP.RoundTripTime" in self.data:
             rtt_series = self.data["OutboundRTP.RoundTripTime"] * 1000

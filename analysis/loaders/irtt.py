@@ -19,12 +19,17 @@ class IrttData:
             client = ts.get("client", {})
             send_ns = (client.get("send") or {}).get("wall")
             recv_ns = (client.get("receive") or {}).get("wall")
+
+            # Only process round trips with complete timestamp data
             if send_ns is not None and recv_ns is not None:
                 send_ns_list.append(send_ns)
                 rtt_ms_list.append((recv_ns - send_ns) / 1e6)
-            ipdv = (rt or {}).get("ipdv", {})
-            if ipdv is not None:
-                jitter_ms_list.append(ipdv.get("rtt", 0) / 1e6)
+
+                ipdv = (rt or {}).get("ipdv", {})
+                jitter_ms = 0
+                if ipdv is not None:
+                    jitter_ms = abs(ipdv.get("rtt", 0) / 1e6)
+                jitter_ms_list.append(jitter_ms)
 
         self.round_trips = pd.DataFrame(
             {
