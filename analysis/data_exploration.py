@@ -24,6 +24,7 @@ def main():
 
     send_br = ms.get_send_bitrate_kbps(args.resample_ms)
     recv_br = ms.get_recv_bitrate_kbps(args.resample_ms)
+    loss_rate = ms.get_loss_rate()
     rtt = ms.get_rtt_ms()
     jitter = ms.get_jitter_ms()
     reconfig_times = ms.get_reconfiguration_times()
@@ -32,19 +33,20 @@ def main():
     feedback_interval = ms.get_feedback_interval_ms()
     # Fetch congestion states (enum-like) if present
     cong_states = ms.get_congestion_states()
-    # Adjust number of plots if delay_estimate or cong_states are available
-    num_plots = 2 \
+    # Adjust number of plots: always add 1 for loss
+    num_plots = 3 \
         + (1 if jitter is not None else 0) \
         + (1 if cong_br is not None else 0) \
         + (1 if delay_estimate is not None else 0) \
         + (1 if feedback_interval is not None else 0) \
         + (1 if (cong_states is not None and not cong_states.empty) else 0)
-    heights = {2: 8, 3: 10, 4: 12, 5: 14, 6: 16}
+    heights = {2: 8, 3: 10, 4: 12, 5: 14, 6: 16, 7: 18, 8: 20}
     fig, axes = plt.subplots(num_plots, 1, sharex=True, figsize=(10, heights.get(num_plots, 12)))
     axes_list: list[Axes] = np.atleast_1d(axes).ravel().tolist()  # type: ignore[assignment]
-    ax1: Axes = axes_list[0]
-    ax2: Axes = axes_list[1]
-    idx = 2
+    ax1: Axes = axes_list[0]  # Bitrate
+    ax_loss: Axes = axes_list[1]  # Loss
+    ax2: Axes = axes_list[2]  # RTT
+    idx = 3
     ax3: Axes | None = None
     ax_cong: Axes | None = None
     ax_delay: Axes | None = None
@@ -68,10 +70,27 @@ def main():
     # Plot bitrates
     ax1.plot(send_br.index, send_br.values, label='Send Bitrate (kbps)')
     ax1.plot(recv_br.index, recv_br.values, label='Recv Bitrate (kbps)')
+    ax1.set_ylabel('Bitrate (kbps)')
+    ax1.set_title('Bitrate Over Time')
+    ax1.grid(True)
+    ax1.legend()
+
+    # Plot Loss Rate (always second)
+    if loss_rate is not None:
+        ax_loss.plot(loss_rate.index, loss_rate.values * 100, label='Loss Rate (%)', color='tab:gray')
+        ax_loss.set_ylabel('Loss Rate (%)')
+        ax_loss.set_title('Loss Rate Over Time')
+        ax_loss.grid(True)
+        ax_loss.legend()
 
     # Plot RTT (if available)
     if rtt is not None:
         ax2.plot(rtt.index, rtt.values, label='RTT (ms)', color='tab:red')
+        ax2.set_xlabel('Time')
+        ax2.set_ylabel('RTT (ms)')
+        ax2.set_title('RTT Over Time')
+        ax2.grid(True)
+        ax2.legend()
 
     # Plot Jitter (if available)
     if jitter is not None and ax3 is not None:
@@ -153,7 +172,7 @@ def main():
     # Plot reconfigurations on all axes
     role_colors = {"sender": "tab:orange", "receiver": "tab:green"}
     shown_roles = set()
-    all_axes: list[Axes] = [ax1, ax2]
+    all_axes: list[Axes] = [ax1, ax_loss, ax2]
     if ax3 is not None:
         all_axes.append(ax3)
     if ax_cong is not None:
@@ -166,8 +185,8 @@ def main():
         all_axes.append(ax_states)
     for role, ts in reconfig_times:
         label = f"Reconfig ({role})" if role not in shown_roles else None
+        # Pass ts directly (likely pd.Timestamp), do not convert to float
         for i, ax in enumerate(all_axes):
-            # Always use ts here to avoid truncating nanoseconds
             ax.axvline(ts, color=role_colors.get(role, "k"), linestyle=":", linewidth=1, label=label if i == 0 else None)
         shown_roles.add(role)
 
