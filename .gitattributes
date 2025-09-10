@@ -1,3 +1,4 @@
 ./bin/gcc_tester filter=lfs diff=lfs merge=lfs -text
+testdata/*.mp4 filter=lfs diff=lfs merge=lfs -text
 bin/* filter=lfs diff=lfs merge=lfs -text
 bin/** filter=lfs diff=lfs merge=lfs -text
