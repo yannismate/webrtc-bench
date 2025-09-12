@@ -117,6 +117,11 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 		guardEnabled = true
 	}
 
+	guardProbingEnabled := false
+	if val, ok := config.AdditionalConfig["enable_guard_probing"]; ok && val == "true" {
+		guardProbingEnabled = true
+	}
+
 	realEncodingEnabled := false
 	if val, ok := config.AdditionalConfig["use_real_codec"]; ok && val == "true" {
 		realEncodingEnabled = true
@@ -143,6 +148,7 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 		"--stat-interval", strconv.Itoa(int(time.Duration(config.StatInterval).Milliseconds())),
 		"--enable-detection", strconv.FormatBool(detectionEnabled),
 		"--enable-guard", strconv.FormatBool(guardEnabled),
+		"--enable-guard-probing", strconv.FormatBool(guardProbingEnabled),
 		"--use-real-codec", strconv.FormatBool(realEncodingEnabled),
 		"--use-ffmpeg-source", strconv.FormatBool(ffmpegSourceEnabled),
 		"--ffmpeg-source-file", ffmpegSourceFile,
@@ -174,7 +180,7 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 
 	go func() {
 		var latestGCCStats *results.GCCStats
-		var guardEngaged *bool
+		var guardState *string
 		var msSinceLastReport *int
 		for c.stdoutReader.Scan() {
 			if c.isStopping {
@@ -238,7 +244,7 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 					}
 					if latestGCCStats != nil {
 						latestGCCStats.MsSinceLastReport = msSinceLastReport
-						latestGCCStats.GuardEngaged = guardEngaged
+						latestGCCStats.GuardState = guardState
 					}
 					statLine := convertSignalsToStatLine(inboundRTP, outboundRTP, remoteInboundRTP, remoteOutboundRTP, latestGCCStats)
 					c.statCollector.RecordRow(statLine)
@@ -269,14 +275,15 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 						continue
 					}
 
-					isEngaged, err := strconv.ParseBool(parts[1])
+					guardStateInt, err := strconv.Atoi(parts[0])
 					if err != nil {
-						log.Error().Msgf("Error parsing signal guard staus: %s", parts[1])
+						log.Error().Msgf("Error parsing signal guard state: %s", parts[1])
 					}
 
 					if latestGCCStats != nil {
 						msSinceLastReport = &newMsSinceLastReport
-						guardEngaged = &isEngaged
+						guardStateStr := convertGuardState(guardStateInt)
+						guardState = &guardStateStr
 					}
 				} else {
 					log.Error().Msgf("Unknown signal: %s", line)
@@ -350,6 +357,19 @@ func (c *CaseVideoLibWebRTC) Stop() {
 			log.Fatal().Msgf("LibWebRTC process did not exit!")
 		}
 		log.Info().Msgf("LibWebRTC process exited!")
+	}
+}
+
+func convertGuardState(state int) string {
+	switch state {
+	case 0:
+		return "normal"
+	case 1:
+		return "detected_feedback_gap"
+	case 2:
+		return "confirmed_gap"
+	default:
+		return "unknown"
 	}
 }
 
