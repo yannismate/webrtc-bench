@@ -112,7 +112,7 @@ class ParquetData:
         return None
 
     def get_congestion_states(self) -> pd.DataFrame | None:
-        state_columns = [col for col in ['GCCStats.Usage', 'GCCStats.State', 'GCCStats.DetectedReconfiguration', 'GCCStats.GuardEngaged'] if col in self.data]
+        state_columns = [col for col in ['GCCStats.Usage', 'GCCStats.State', 'GCCStats.DetectedReconfiguration', 'GCCStats.GuardState'] if col in self.data]
         if state_columns:
             df = self.data[state_columns].copy()
             df.index.name = 'Timestamp'

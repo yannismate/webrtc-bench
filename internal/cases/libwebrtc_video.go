@@ -274,15 +274,9 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 						continue
 					}
 
-					guardStateInt, err := strconv.Atoi(parts[0])
-					if err != nil {
-						log.Error().Msgf("Error parsing signal guard state: %s", parts[1])
-					}
-
 					if latestGCCStats != nil {
 						msSinceLastReport = &newMsSinceLastReport
-						guardStateStr := convertGuardState(guardStateInt)
-						guardState = &guardStateStr
+						guardState = &parts[1]
 					}
 				} else {
 					log.Error().Msgf("Unknown signal: %s", line)
@@ -356,19 +350,6 @@ func (c *CaseVideoLibWebRTC) Stop() {
 			log.Fatal().Msgf("LibWebRTC process did not exit!")
 		}
 		log.Info().Msgf("LibWebRTC process exited!")
-	}
-}
-
-func convertGuardState(state int) string {
-	switch state {
-	case 0:
-		return "normal"
-	case 1:
-		return "detected_feedback_gap"
-	case 2:
-		return "confirmed_gap"
-	default:
-		return "unknown"
 	}
 }
 
