@@ -177,6 +177,10 @@ func (c *CaseVideoChrome) OnReceiveSignal(signalType PeerSignalType, message []b
 	return nil
 }
 
+func (c *CaseVideoChrome) GetLargeResultFiles() *map[string]string {
+	return nil
+}
+
 func (c *CaseVideoChrome) GetExtraResultFiles() *map[string][]byte {
 	return nil
 }

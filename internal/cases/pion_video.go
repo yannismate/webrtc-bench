@@ -415,6 +415,10 @@ func (c *CaseVideoPion) Start() error {
 	return c.transceiver.SetCodecPreferences(codecParams)
 }
 
+func (c *CaseVideoPion) GetLargeResultFiles() *map[string]string {
+	return nil
+}
+
 func (c *CaseVideoPion) GetExtraResultFiles() *map[string][]byte {
 	extraResultFiles := make(map[string][]byte)
 	for _, file := range c.seqRecorderFactory.GetFiles() {

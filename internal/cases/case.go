@@ -25,6 +25,7 @@ type PeerCaseExecutor interface {
 	Start() error
 	OnReceiveSignal(signalType PeerSignalType, message []byte) error
 	GetExtraResultFiles() *map[string][]byte
+	GetLargeResultFiles() *map[string]string
 	Stop()
 }
 

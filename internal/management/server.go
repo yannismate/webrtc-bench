@@ -3,6 +3,7 @@ package management
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
@@ -33,11 +34,19 @@ type server struct {
 	shuttingDown       bool
 	currentResultPath  string
 	writeResultsWaiter sync.WaitGroup
+	fileChunks         map[string]*chunkState
+	fileChunksMutex    sync.Mutex
 }
 
 type wsClient struct {
 	SendChan           chan []byte
 	RegisteredAsClient *string
+}
+
+type chunkState struct {
+	file           *os.File
+	totalChunks    int
+	receivedChunks []bool
 }
 
 func NewServer(listenAddr string, authenticationKey string) Server {
@@ -47,6 +56,7 @@ func NewServer(listenAddr string, authenticationKey string) Server {
 		Clients:                   make(map[string]wsClient),
 		ClientStateUpdateListener: func(string, ClientState) {},
 		shuttingDown:              false,
+		fileChunks:                make(map[string]*chunkState),
 	}
 }
 
@@ -91,6 +101,67 @@ func (s *server) getPeerByName(name string) (wsClient, bool) {
 		}
 	}
 	return wsClient{}, false
+}
+
+func (s *server) handleFileChunk(clientId string, chunk MessageFileChunk) error {
+	s.fileChunksMutex.Lock()
+	defer s.fileChunksMutex.Unlock()
+
+	client := s.Clients[clientId]
+	if client.RegisteredAsClient == nil {
+		return errors.New("client not registered")
+	}
+
+	chunkKey := fmt.Sprintf("%s_%s", *client.RegisteredAsClient, chunk.FileName)
+
+	state, exists := s.fileChunks[chunkKey]
+	if !exists {
+		filePath := path.Join(s.currentResultPath, chunk.FileName)
+		file, err := os.Create(filePath)
+		if err != nil {
+			return fmt.Errorf("failed to create chunk file: %w", err)
+		}
+
+		state = &chunkState{
+			file:           file,
+			totalChunks:    chunk.TotalChunks,
+			receivedChunks: make([]bool, chunk.TotalChunks),
+		}
+		s.fileChunks[chunkKey] = state
+	}
+
+	if chunk.ChunkIndex >= len(state.receivedChunks) {
+		return fmt.Errorf("chunk index %d exceeds total chunks %d", chunk.ChunkIndex, len(state.receivedChunks))
+	}
+
+	if state.receivedChunks[chunk.ChunkIndex] {
+		return fmt.Errorf("chunk %d already received for file %s", chunk.ChunkIndex, chunk.FileName)
+	}
+
+	if _, err := state.file.Write(chunk.Data); err != nil {
+		return fmt.Errorf("failed to write chunk data: %w", err)
+	}
+
+	state.receivedChunks[chunk.ChunkIndex] = true
+
+	if chunk.IsFinal {
+		allReceived := true
+		for i, received := range state.receivedChunks {
+			if !received {
+				log.Warn().Msgf("Chunk %d not received for file %s", i, chunk.FileName)
+				allReceived = false
+			}
+		}
+
+		state.file.Close()
+		delete(s.fileChunks, chunkKey)
+
+		if !allReceived {
+			return errors.New("not all chunks received")
+		}
+	}
+
+	return nil
 }
 
 func (s *server) SetShuttingDown() {
@@ -317,6 +388,21 @@ func (s *server) handleWs(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 				}()
+			case MessageTypeFileChunk:
+				innerMsg := MessageFileChunk{}
+				err := json.Unmarshal(outerMsg.Data, &innerMsg)
+				if err != nil {
+					log.Error().Err(err).Msg("Could not parse received file chunk message")
+					_ = c.Close()
+					return
+				}
+
+				err = s.handleFileChunk(clientId, innerMsg)
+				if err != nil {
+					log.Error().Err(err).Msg("Error handling file chunk")
+					_ = c.Close()
+					return
+				}
 			}
 		}
 	}

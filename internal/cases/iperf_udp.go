@@ -173,6 +173,10 @@ func (c *CaseIPerfUDP) Stop() {
 	}
 }
 
+func (c *CaseIPerfUDP) GetLargeResultFiles() *map[string]string {
+	return nil
+}
+
 func (c *CaseIPerfUDP) GetExtraResultFiles() *map[string][]byte {
 	iperfFileName := "iperf-receiver.json"
 	if c.isSender {

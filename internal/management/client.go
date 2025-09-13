@@ -259,6 +259,20 @@ func (c *client) Start() {
 						FileData:        fileData,
 						AdditionalFiles: extraFiles,
 					})
+
+					largeFiles := c.CurrentCase.GetLargeResultFiles()
+					if largeFiles != nil {
+						for fileName, filePath := range *largeFiles {
+							if err := c.sendFileInChunks(filePath, fileName); err != nil {
+								log.Fatal().Err(err).Msgf("Error sending chunked file %s", fileName)
+								return
+							}
+							err := os.Remove(fileName)
+							if err != nil {
+								log.Fatal().Err(err).Msgf("Error deleting chunked file %s", fileName)
+							}
+						}
+					}
 				}
 				log.Debug().Msgf("Sent case results message.")
 
@@ -398,6 +412,46 @@ func (c *client) stopObstructionMapTracking() {
 	close(c.dishyStopDataCollectionChan)
 	c.dishyDataCollectionStopped.Wait()
 	log.Debug().Msg("Obstruction map tracking stopped.")
+}
+
+func (c *client) sendFileInChunks(filePath, fileName string) error {
+	const chunkSize = 10 * 1024 * 1024 // 10MB
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	stat, err := file.Stat()
+	if err != nil {
+		return err
+	}
+
+	fileSize := stat.Size()
+	totalChunks := int((fileSize + int64(chunkSize) - 1) / int64(chunkSize))
+
+	buffer := make([]byte, chunkSize)
+
+	for chunkIndex := 0; chunkIndex < totalChunks; chunkIndex++ {
+		n, err := file.Read(buffer)
+		if err != nil && err != io.EOF {
+			return err
+		}
+
+		chunk := buffer[:n]
+		isFinal := chunkIndex == totalChunks-1
+
+		c.SendMessage(MessageTypeFileChunk, MessageFileChunk{
+			FileName:    fileName,
+			ChunkIndex:  chunkIndex,
+			TotalChunks: totalChunks,
+			Data:        chunk,
+			IsFinal:     isFinal,
+		})
+	}
+
+	return nil
 }
 
 func (c *client) Stop() {

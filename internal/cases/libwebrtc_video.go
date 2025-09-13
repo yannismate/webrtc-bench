@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"github.com/rs/zerolog/log"
-	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -412,6 +411,10 @@ func convertSignalToGCCStats(signal gccStatsSignal) results.GCCStats {
 }
 
 func (c *CaseVideoLibWebRTC) GetExtraResultFiles() *map[string][]byte {
+	return nil
+}
+
+func (c *CaseVideoLibWebRTC) GetLargeResultFiles() *map[string]string {
 	if c.isUsingFFMpegOutput && !c.isSender {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -419,25 +422,9 @@ func (c *CaseVideoLibWebRTC) GetExtraResultFiles() *map[string][]byte {
 			return nil
 		}
 		outputFilePath := path.Join(cwd, "received_video.ts")
-		outputFile, err := os.Open(outputFilePath)
-		if err != nil {
-			log.Error().Err(err).Msgf("Error opening video output file: %s", outputFilePath)
-			return nil
-		}
 
-		videoBytes, err := io.ReadAll(outputFile)
-		if err != nil {
-			log.Error().Err(err).Msgf("Error reading video output file: %s", outputFilePath)
-			return nil
-		}
-
-		err = os.Remove(outputFilePath)
-		if err != nil {
-			log.Error().Err(err).Msgf("Error deleting video output file: %s", outputFilePath)
-		}
-
-		return &map[string][]byte{
-			"received_video.ts": videoBytes,
+		return &map[string]string{
+			"received_video.ts": outputFilePath,
 		}
 	}
 	return nil

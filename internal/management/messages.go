@@ -22,6 +22,7 @@ const (
 	MessageTypePeerSignal         MessageType = "peer_signal"
 	MessageTypeShutdown           MessageType = "shutdown"
 	MessageTypeResults            MessageType = "results"
+	MessageTypeFileChunk          MessageType = "file_chunk"
 )
 
 type MessageContainer struct {
@@ -63,4 +64,12 @@ type MessageResults struct {
 	Metadata        util.TestMetadata
 	FileData        []byte
 	AdditionalFiles *map[string][]byte
+}
+
+type MessageFileChunk struct {
+	FileName    string
+	ChunkIndex  int
+	TotalChunks int
+	Data        []byte
+	IsFinal     bool
 }

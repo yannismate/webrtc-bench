@@ -109,6 +109,10 @@ func (c *CaseConnectChrome) OnReceiveSignal(signalType PeerSignalType, message [
 	return nil
 }
 
+func (c *CaseConnectChrome) GetLargeResultFiles() *map[string]string {
+	return nil
+}
+
 func (c *CaseConnectChrome) GetExtraResultFiles() *map[string][]byte {
 	return nil
 }

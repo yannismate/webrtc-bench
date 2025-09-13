@@ -195,6 +195,10 @@ func (c *CaseConnectPion) OnReceiveSignal(signalType PeerSignalType, message []b
 	return errors.New("unrecognized signalType")
 }
 
+func (c *CaseConnectPion) GetLargeResultFiles() *map[string]string {
+	return nil
+}
+
 func (c *CaseConnectPion) GetExtraResultFiles() *map[string][]byte {
 	return nil
 }
