@@ -17,6 +17,7 @@ def main():
     parser.add_argument("path", help="Path to the results")
     parser.add_argument("--resample-ms", type=int, default=200, help="Interval for resampling rate graphs in ms")
     parser.add_argument("--dishy-trail", type=int, default=15, help="Trail length in seconds for Dishy position heatmap")
+    parser.add_argument("--plot-fps", type=bool, default=False, help="Add a plot for FPS if available")
     args = parser.parse_args()
 
     ms = Measurement(args.path)
@@ -31,16 +32,17 @@ def main():
     cong_br = ms.get_congestion_bitrates()
     delay_estimate = ms.get_delay_estimate_ms()
     feedback_interval = ms.get_feedback_interval_ms()
-    # Fetch congestion states (enum-like) if present
     cong_states = ms.get_congestion_states()
-    # Adjust number of plots: always add 1 for loss
+    send_fps = ms.get_send_fps() if args.plot_fps else None
+    recv_fps = ms.get_recv_fps() if args.plot_fps else None
     num_plots = 3 \
         + (1 if jitter is not None else 0) \
         + (1 if cong_br is not None else 0) \
         + (1 if delay_estimate is not None else 0) \
         + (1 if feedback_interval is not None else 0) \
-        + (1 if (cong_states is not None and not cong_states.empty) else 0)
-    heights = {2: 8, 3: 10, 4: 12, 5: 14, 6: 16, 7: 18, 8: 20}
+        + (1 if (cong_states is not None and not cong_states.empty) else 0) \
+        + (1 if (args.plot_fps and (send_fps is not None or recv_fps is not None)) else 0)
+    heights = {2: 8, 3: 10, 4: 12, 5: 14, 6: 16, 7: 18, 8: 20, 9: 22}
     fig, axes = plt.subplots(num_plots, 1, sharex=True, figsize=(10, heights.get(num_plots, 12)))
     axes_list: list[Axes] = np.atleast_1d(axes).ravel().tolist()  # type: ignore[assignment]
     ax1: Axes = axes_list[0]  # Bitrate
@@ -52,6 +54,7 @@ def main():
     ax_delay: Axes | None = None
     ax_feedback_interval: Axes | None = None
     ax_states: Axes | None = None
+    ax_fps: Axes | None = None
     if jitter is not None and idx < len(axes_list):
         ax3 = axes_list[idx]
         idx += 1
@@ -63,6 +66,9 @@ def main():
         idx += 1
     if feedback_interval is not None and idx < len(axes_list):
         ax_feedback_interval = axes_list[idx]
+        idx += 1
+    if (args.plot_fps and (send_fps is not None or recv_fps is not None)) and idx < len(axes_list):
+        ax_fps = axes_list[idx]
         idx += 1
     if (cong_states is not None and not cong_states.empty) and idx < len(axes_list):
         ax_states = axes_list[idx]
@@ -124,6 +130,17 @@ def main():
         ax_feedback_interval.grid(True)
         ax_feedback_interval.legend()
 
+    if (args.plot_fps and ax_fps is not None) and (send_fps is not None or recv_fps is not None):
+        if send_fps is not None:
+            ax_fps.plot(send_fps.index, send_fps.values, label='Send FPS')
+        if recv_fps is not None:
+            ax_fps.plot(recv_fps.index, recv_fps.values, label='Recv FPS')
+        ax_fps.set_xlabel('Time')
+        ax_fps.set_ylabel('FPS')
+        ax_fps.set_title('FPS Over Time')
+        ax_fps.grid(True)
+        ax_fps.legend()
+
     # Plot congestion states (if available) as colored timelines per column
     if cong_states is not None and ax_states is not None and not cong_states.empty:
         cols = list(cong_states.columns)
@@ -181,6 +198,8 @@ def main():
         all_axes.append(ax_delay)
     if ax_feedback_interval is not None:
         all_axes.append(ax_feedback_interval)
+    if ax_fps is not None:
+        all_axes.append(ax_fps)
     if ax_states is not None:
         all_axes.append(ax_states)
     for role, ts in reconfig_times:

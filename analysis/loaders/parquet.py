@@ -122,6 +122,22 @@ class ParquetData:
     def get_timestamp_range(self) -> tuple[pd.Timestamp, pd.Timestamp]:
         return self.data.index.min(), self.data.index.max()
 
+    def get_send_fps(self) -> pd.Series | None:
+        if "OutboundRTP.FramesSent" not in self.data:
+            return None
+        fps = self.data["OutboundRTP.FramesSent"].resample("1s").max().diff().fillna(0).clip(lower=0)
+        fps.index.name = 'Timestamp'
+        fps.name = "send_fps"
+        return fps
+
+    def get_recv_fps(self) -> pd.Series | None:
+        if "InboundRTP.FramesReceived" not in self.data:
+            return None
+        fps = self.data["InboundRTP.FramesReceived"].resample("1s").max().diff().fillna(0).clip(lower=0)
+        fps.index.name = 'Timestamp'
+        fps.name = "recv_fps"
+        return fps
+
 def parquet_from_file(file_path: str) -> ParquetData | None:
     print("Loading Parquet data from file:", file_path)
     if not os.path.exists(file_path):

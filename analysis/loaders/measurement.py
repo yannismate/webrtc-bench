@@ -185,6 +185,16 @@ class Measurement:
                 return states
         return None
 
+    def get_send_fps(self) -> pd.Series | None:
+        if self.data_parquet_sender is not None:
+            return self.data_parquet_sender.get_send_fps()
+        return None
+
+    def get_recv_fps(self) -> pd.Series | None:
+        if self.data_parquet_receiver is not None:
+            return self.data_parquet_receiver.get_recv_fps()
+        return None
+
 
     def __load_dishy_files(self):
         sender_path = os.path.join(self.folder_path, "dishy_sender.json")
