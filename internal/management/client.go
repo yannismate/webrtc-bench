@@ -19,6 +19,7 @@ import (
 	"webrtc-bench/internal/cases"
 	"webrtc-bench/internal/cases/stats"
 	"webrtc-bench/internal/dishy"
+	"webrtc-bench/internal/pinger"
 	"webrtc-bench/internal/results"
 	"webrtc-bench/internal/util"
 )
@@ -39,6 +40,8 @@ type client struct {
 	CurrentCaseConfig   cases.PeerCaseConfig
 	CurrentResultWriter results.ParquetResultsWriter
 	CurrentCaseMetadata util.TestMetadata
+
+	pinger pinger.Pinger
 
 	dishyClient                 dishy.DeviceClient
 	dishyAvailable              bool
@@ -174,6 +177,9 @@ func (c *client) Start() {
 				if c.dishyAvailable {
 					c.startObstructionMapTracking()
 				}
+				if c.pinger != nil {
+					c.pinger.Start()
+				}
 				if c.CurrentCaseConfig.ConfigurationCommands != nil {
 					go func() {
 						cmdSecTicker := time.NewTicker(time.Second)
@@ -216,6 +222,9 @@ func (c *client) Start() {
 				if c.dishyAvailable {
 					c.stopObstructionMapTracking()
 				}
+				if c.pinger != nil {
+					c.pinger.Stop()
+				}
 				c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateTestEnding})
 				log.Info().Msg("Case execution stopped")
 
@@ -252,6 +261,15 @@ func (c *client) Start() {
 							extraFiles = &newExtraFiles
 						}
 						(*extraFiles)["dishy_"+c.ClientName+".json"] = dishyData
+					}
+
+					if c.pinger != nil {
+						if extraFiles == nil {
+							newExtraFiles := make(map[string][]byte)
+							extraFiles = &newExtraFiles
+						}
+						(*extraFiles)["icmp_"+c.ClientName+".json"] = c.pinger.GetResultData()
+						c.pinger = nil
 					}
 
 					c.SendMessage(MessageTypeResults, MessageResults{
@@ -515,6 +533,15 @@ func (c *client) configureCase(configMsg MessageConfigureClient) {
 		c.CurrentCase = &cases.CaseIPerfUDP{Duration: time.Duration(configMsg.CaseDuration)}
 	} else {
 		log.Fatal().Msgf("Unrecognized implementation type: %s", configMsg.CaseType)
+	}
+
+	if configMsg.Config.ICMPPingInterval != nil && configMsg.Config.ICMPPingTarget != nil {
+		pngr, err := pinger.NewPinger(*configMsg.Config.ICMPPingTarget, time.Duration(*configMsg.Config.ICMPPingInterval))
+		if err != nil {
+			log.Fatal().Err(err).Msgf("Could not create ICMP pinger to target %s", *configMsg.Config.ICMPPingTarget)
+		}
+		c.pinger = pngr
+		log.Info().Msgf("Configured ICMP pinger targetting %s", *configMsg.Config.ICMPPingTarget)
 	}
 
 	resultWriter, err := results.NewParquetResultsWriter()
