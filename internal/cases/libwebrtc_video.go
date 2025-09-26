@@ -142,7 +142,8 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 	}
 	c.isUsingFFMpegOutput = ffmpegOutputEnabled
 
-	c.process = exec.Command("bin/gcc_tester", "--sender", strconv.FormatBool(config.SendOffer),
+	args := []string{
+		"--sender", strconv.FormatBool(config.SendOffer),
 		"--bitrate", bitrateStr, "--ice", config.ICEServers[0],
 		"--stat-interval", strconv.Itoa(int(time.Duration(config.StatInterval).Milliseconds())),
 		"--enable-detection", strconv.FormatBool(detectionEnabled),
@@ -151,7 +152,18 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 		"--use-real-codec", strconv.FormatBool(realEncodingEnabled),
 		"--use-ffmpeg-source", strconv.FormatBool(ffmpegSourceEnabled),
 		"--ffmpeg-source-file", ffmpegSourceFile,
-		"--use-ffmpeg-output", strconv.FormatBool(ffmpegOutputEnabled))
+		"--use-ffmpeg-output", strconv.FormatBool(ffmpegOutputEnabled),
+	}
+
+	if val, ok := config.AdditionalConfig["enable_guard_probing_additional_probes"]; ok && val == "true" {
+		args = append(args, "--enable-guard-probing-additional-probes", "true")
+	}
+
+	if val, ok := config.AdditionalConfig["guard_probe_values"]; ok {
+		args = append(args, "--guard-probe-values", val)
+	}
+
+	c.process = exec.Command("bin/gcc_tester", args...)
 	c.process.Dir = cwd
 	log.Info().Msgf("Starting external process with command '%v'", c.process.String())
 
