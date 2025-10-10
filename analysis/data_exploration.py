@@ -33,14 +33,18 @@ def main():
     delay_estimate = ms.get_delay_estimate_ms()
     feedback_interval = ms.get_feedback_interval_ms()
     cong_states = ms.get_congestion_states()
+    icmp_pings = ms.get_icmp_pings()
     send_fps = ms.get_send_fps() if args.plot_fps else None
     recv_fps = ms.get_recv_fps() if args.plot_fps else None
+    probe_timestamps = ms.get_probe_timestamps()
+    guard_trigger_timestamps = ms.get_guard_trigger_timestamps()
     num_plots = 3 \
         + (1 if jitter is not None else 0) \
         + (1 if cong_br is not None else 0) \
         + (1 if delay_estimate is not None else 0) \
         + (1 if feedback_interval is not None else 0) \
         + (1 if (cong_states is not None and not cong_states.empty) else 0) \
+        + (1 if icmp_pings is not None else 0) \
         + (1 if (args.plot_fps and (send_fps is not None or recv_fps is not None)) else 0)
     heights = {2: 8, 3: 10, 4: 12, 5: 14, 6: 16, 7: 18, 8: 20, 9: 22}
     fig, axes = plt.subplots(num_plots, 1, sharex=True, figsize=(10, heights.get(num_plots, 12)))
@@ -55,6 +59,7 @@ def main():
     ax_feedback_interval: Axes | None = None
     ax_states: Axes | None = None
     ax_fps: Axes | None = None
+    ax_icmp_pings: Axes | None = None
     if jitter is not None and idx < len(axes_list):
         ax3 = axes_list[idx]
         idx += 1
@@ -72,6 +77,9 @@ def main():
         idx += 1
     if (cong_states is not None and not cong_states.empty) and idx < len(axes_list):
         ax_states = axes_list[idx]
+        idx += 1
+    if icmp_pings is not None and idx < len(axes_list):
+        ax_icmp_pings = axes_list[idx]
 
     # Plot bitrates
     ax1.plot(send_br.index, send_br.values, label='Send Bitrate (kbps)')
@@ -204,10 +212,26 @@ def main():
         all_axes.append(ax_states)
     for role, ts in reconfig_times:
         label = f"Reconfig ({role})" if role not in shown_roles else None
-        # Pass ts directly (likely pd.Timestamp), do not convert to float
         for i, ax in enumerate(all_axes):
-            ax.axvline(ts, color=role_colors.get(role, "k"), linestyle=":", linewidth=1, label=label if i == 0 else None)
+            ax.axvline(ts, color=role_colors.get(role, "k"), linestyle="-", linewidth=2.0, label=label if i == 0 else None)
         shown_roles.add(role)
+
+    if probe_timestamps is not None:
+        for i, (ax, ts) in enumerate([(ax, ts) for ax in all_axes for ts in probe_timestamps]):
+            label = "Probe" if i == 0 else None
+            ax.axvline(ts, color="purple", linestyle=(0, (5, 2)), linewidth=1.5, label=label)
+
+    if guard_trigger_timestamps is not None:
+        for i, (ax, ts) in enumerate([(ax, ts) for ax in all_axes for ts in guard_trigger_timestamps]):
+            label = "Guard Trigger" if i == 0 else None
+            ax.axvline(ts, color="green", linestyle=(0, (1, 1)), linewidth=1.0, label=label)
+
+    if icmp_pings is not None:
+        ax_icmp_pings.plot(icmp_pings.index, icmp_pings.values, label='ICMP RTT', color='tab:gray')
+        ax_icmp_pings.set_ylabel('RTT (ms)')
+        ax_icmp_pings.set_title('ICMP RTT')
+        ax_icmp_pings.grid(True)
+        ax_icmp_pings.legend()
 
     ax1.set_ylabel('Bitrate (kbps)')
     ax1.set_title('Bitrate Over Time')

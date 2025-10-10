@@ -3,9 +3,12 @@ from enum import Enum
 import pandas as pd
 
 from loaders.dishy import dishy_from_file, DishyData
+from loaders.guard_triggers import GuardTriggerData, guard_triggers_from_file
+from loaders.icmp_ping import icmp_ping_from_json, IcmpPingData
 from loaders.iperf import iperf_from_file, IPerfData
 from loaders.irtt import IrttData, irtt_from_file
 from loaders.parquet import ParquetData, parquet_from_file
+from loaders.probes import ProbeData, probes_from_file
 
 
 class MeasurementType(Enum):
@@ -25,6 +28,9 @@ class Measurement:
     data_irtt: IrttData | None = None
     data_parquet_sender: ParquetData | None = None
     data_parquet_receiver: ParquetData | None = None
+    data_icmp_sender: IcmpPingData | None = None
+    data_probes_sender: ProbeData | None = None
+    data_guard_triggers_sender: GuardTriggerData | None = None
 
     def __init__(self, folder_path: str = None):
         if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
@@ -62,6 +68,8 @@ class Measurement:
         self.__load_iperf_files()
         self.__load_irtt_files()
         self.__load_parquet_files()
+        self.__load_probes_files()
+        self.__load_guard_trigger_files()
 
     def get_send_bitrate_kbps(self, resample_ms: int = 200) -> pd.Series | None:
         if self.data_parquet_sender is not None:
@@ -195,6 +203,22 @@ class Measurement:
             return self.data_parquet_receiver.get_recv_fps()
         return None
 
+    def get_icmp_pings(self) -> pd.Series | None:
+        if self.data_icmp_sender is None:
+            self.__load_icmp_ping_files()
+        if self.data_icmp_sender is not None:
+            return self.data_icmp_sender.get_icmp_pings()
+        return None
+
+    def get_probe_timestamps(self) -> pd.Series | None:
+        if self.data_probes_sender is not None:
+            return self.data_probes_sender.get_probe_timestamps()
+        return None
+
+    def get_guard_trigger_timestamps(self) -> pd.Series | None:
+        if self.data_guard_triggers_sender is not None:
+            return self.data_guard_triggers_sender.get_guard_trigger_timestamps()
+        return None
 
     def __load_dishy_files(self):
         sender_path = os.path.join(self.folder_path, "dishy_sender.json")
@@ -224,3 +248,18 @@ class Measurement:
             self.data_parquet_sender = parquet_from_file(sender_path)
         if os.path.exists(receiver_path):
             self.data_parquet_receiver = parquet_from_file(receiver_path)
+
+    def __load_icmp_ping_files(self):
+        sender_path = os.path.join(self.folder_path, "icmp_sender.json")
+        if os.path.exists(sender_path):
+            self.data_icmp_sender = icmp_ping_from_json(sender_path)
+
+    def __load_probes_files(self):
+        sender_path = os.path.join(self.folder_path, "probes.json")
+        if os.path.exists(sender_path):
+            self.data_probes_sender = probes_from_file(sender_path)
+
+    def __load_guard_trigger_files(self):
+        sender_path = os.path.join(self.folder_path, "guard_triggers.json")
+        if os.path.exists(sender_path):
+            self.data_guard_triggers_sender = guard_triggers_from_file(sender_path)
