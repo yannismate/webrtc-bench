@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
+	"github.com/shirou/gopsutil/v4/process"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"io"
@@ -174,6 +175,9 @@ func (c *client) Start() {
 					log.Error().Msg("Cannot start execution, no case configured!")
 					continue
 				}
+				log.Info().Msg("Processes running before case startup:")
+				printProcesses()
+
 				if c.dishyAvailable {
 					c.startObstructionMapTracking()
 				}
@@ -308,6 +312,9 @@ func (c *client) Start() {
 						log.Error().Err(err).Msgf("Killing PID %d failed", p.Pid)
 					}
 				}
+
+				log.Info().Msg("Processes running after case shutdown:")
+				printProcesses()
 
 				c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateRegistered})
 			case MessageTypePeerSignal:
@@ -632,4 +639,27 @@ func (c *client) executeCommand(cmd string) {
 		return
 	}
 	log.Info().Msgf("Executed command: %s", cmd)
+}
+
+func printProcesses() {
+	processes, err := process.Processes()
+	if err != nil {
+		log.Error().Err(err).Msg("Could not get processes")
+	} else {
+
+		for _, p := range processes {
+			pPath, err := p.Exe()
+			if err != nil {
+				log.Error().Err(err).Msg("Could not get process exe")
+				continue
+			}
+			pTime, err := p.CreateTime()
+			if err != nil {
+				log.Error().Err(err).Msg("Could not get process creation time")
+				continue
+			}
+			pTimeParsed := time.Unix(0, int64(time.Millisecond)*pTime)
+			log.Info().Msgf("  - %s (%v) [started %v]", pPath, p.Pid, pTimeParsed)
+		}
+	}
 }
