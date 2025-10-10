@@ -26,6 +26,9 @@ type CaseVideoLibWebRTC struct {
 	isSender            bool
 	isStopping          bool
 	isUsingFFMpegOutput bool
+
+	probes        []probeAction
+	guardTriggers []time.Time
 }
 
 type gccStatsSignal struct {
@@ -88,6 +91,11 @@ type signalRemoteInboundRTP struct {
 	Jitter        float64
 	PacketsLost   uint64
 	RoundTripTime float64
+}
+
+type probeAction struct {
+	Time   time.Time
+	Values []int64
 }
 
 func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(signalType PeerSignalType, data []byte) error, statCollector stats.StatCollector) error {
@@ -161,6 +169,10 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 
 	if val, ok := config.AdditionalConfig["guard_probe_values"]; ok {
 		args = append(args, "--guard-probe-values", val)
+	}
+
+	if val, ok := config.AdditionalConfig["guard_probing_max_kbps"]; ok {
+		args = append(args, "--guard-probe-max-kbps", val)
 	}
 
 	c.process = exec.Command("bin/gcc_tester", args...)
@@ -288,8 +300,26 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 
 					if latestGCCStats != nil {
 						msSinceLastReport = &newMsSinceLastReport
-						guardState = &parts[1]
+						newGuardState := parts[1]
+						if guardState != nil && *guardState != newGuardState && newGuardState == "confirmed_gap" {
+							c.guardTriggers = append(c.guardTriggers, time.Now())
+						}
+						guardState = &newGuardState
 					}
+				} else if strings.HasPrefix(line, "SIGNAL/PROBE/") {
+					probeValues := strings.Split(line[13:], "-")
+					p := probeAction{
+						Time:   time.Now(),
+						Values: []int64{},
+					}
+					for _, value := range probeValues {
+						valInt, err := strconv.ParseInt(value, 10, 64)
+						if err != nil {
+							return
+						}
+						p.Values = append(p.Values, valInt)
+					}
+					c.probes = append(c.probes, p)
 				} else {
 					log.Error().Msgf("Unknown signal: %s", line)
 				}
@@ -404,6 +434,26 @@ func convertSignalToGCCStats(signal gccStatsSignal) results.GCCStats {
 }
 
 func (c *CaseVideoLibWebRTC) GetExtraResultFiles() *map[string][]byte {
+	extraResultFiles := make(map[string][]byte)
+	if c.probes != nil && len(c.probes) > 0 {
+		marshal, err := json.Marshal(c.probes)
+		if err != nil {
+			log.Error().Err(err).Msgf("Error marshaling probes")
+			return nil
+		}
+		extraResultFiles["probes.json"] = marshal
+	}
+	if c.guardTriggers != nil && len(c.guardTriggers) > 0 {
+		marshal, err := json.Marshal(c.guardTriggers)
+		if err != nil {
+			log.Error().Err(err).Msgf("Error marshaling guard")
+			return nil
+		}
+		extraResultFiles["guard_triggers.json"] = marshal
+	}
+	if len(extraResultFiles) > 0 {
+		return &extraResultFiles
+	}
 	return nil
 }
 
