@@ -175,6 +175,14 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 		args = append(args, "--guard-probe-max-kbps", val)
 	}
 
+	if val, ok := config.AdditionalConfig["enable_guard_self_fir"]; ok && val == "true" {
+		args = append(args, "--enable-self-fir", "true")
+	}
+
+	if val, ok := config.AdditionalConfig["min_jitter_buffer_ms"]; ok && val == "true" {
+		args = append(args, "--min-jitter-buffer-ms", val)
+	}
+
 	c.process = exec.Command("bin/gcc_tester", args...)
 	c.process.Dir = cwd
 	log.Info().Msgf("Starting external process with command '%v'", c.process.String())
