@@ -114,73 +114,43 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 		bitrateStr = "10000"
 	}
 
-	detectionEnabled := false
-	if val, ok := config.AdditionalConfig["enable_detection"]; ok && val == "true" {
-		detectionEnabled = true
-	}
-
-	guardEnabled := false
-	if val, ok := config.AdditionalConfig["enable_guard"]; ok && val == "true" {
-		guardEnabled = true
-	}
-
-	guardProbingEnabled := false
-	if val, ok := config.AdditionalConfig["enable_guard_probing"]; ok && val == "true" {
-		guardProbingEnabled = true
-	}
-
-	realEncodingEnabled := false
-	if val, ok := config.AdditionalConfig["use_real_codec"]; ok && val == "true" {
-		realEncodingEnabled = true
-	}
-
-	ffmpegSourceEnabled := false
-	if val, ok := config.AdditionalConfig["use_ffmpeg_source"]; ok && val == "true" {
-		ffmpegSourceEnabled = true
-	}
-
-	ffmpegSourceFile := path.Join(cwd, "testdata", "webcam.mkv")
-	if val, ok := config.AdditionalConfig["ffmpeg_source_file"]; ok {
-		ffmpegSourceFile = val
-	}
-
-	ffmpegOutputEnabled := false
-	if val, ok := config.AdditionalConfig["use_ffmpeg_output"]; ok && val == "true" {
-		ffmpegOutputEnabled = true
-	}
-	c.isUsingFFMpegOutput = ffmpegOutputEnabled
-
 	args := []string{
 		"--sender", strconv.FormatBool(config.SendOffer),
 		"--bitrate", bitrateStr, "--ice", config.ICEServers[0],
 		"--stat-interval", strconv.Itoa(int(time.Duration(config.StatInterval).Milliseconds())),
-		"--enable-detection", strconv.FormatBool(detectionEnabled),
-		"--enable-guard", strconv.FormatBool(guardEnabled),
-		"--enable-guard-probing", strconv.FormatBool(guardProbingEnabled),
-		"--use-real-codec", strconv.FormatBool(realEncodingEnabled),
-		"--use-ffmpeg-source", strconv.FormatBool(ffmpegSourceEnabled),
-		"--ffmpeg-source-file", ffmpegSourceFile,
-		"--use-ffmpeg-output", strconv.FormatBool(ffmpegOutputEnabled),
 	}
 
-	if val, ok := config.AdditionalConfig["enable_guard_probing_additional_probes"]; ok && val == "true" {
-		args = append(args, "--enable-guard-probing-additional-probes", "true")
+	if val, ok := config.AdditionalConfig["use_ffmpeg_source"]; ok && val == "true" {
+		args = append(args, "--use-ffmpeg-source", "true")
+		if sourceVal, ok := config.AdditionalConfig["ffmpeg_source_file"]; ok {
+			args = append(args, "--ffmpeg-source-file", sourceVal)
+		} else {
+			args = append(args, "--ffmpeg-source-file", path.Join(cwd, "testdata", "webcam.mkv"))
+		}
 	}
 
-	if val, ok := config.AdditionalConfig["guard_probe_values"]; ok {
-		args = append(args, "--guard-probe-values", val)
+	if val, ok := config.AdditionalConfig["use_ffmpeg_output"]; ok && val == "true" {
+		args = append(args, "--use-ffmpeg-output", "true")
+		c.isUsingFFMpegOutput = true
 	}
 
-	if val, ok := config.AdditionalConfig["guard_probing_max_kbps"]; ok {
-		args = append(args, "--guard-probe-max-kbps", val)
-	}
-
-	if val, ok := config.AdditionalConfig["enable_guard_self_fir"]; ok && val == "true" {
-		args = append(args, "--enable-self-fir", "true")
+	if val, ok := config.AdditionalConfig["use_real_codec"]; ok {
+		args = append(args, "--use-real-codec", val)
 	}
 
 	if val, ok := config.AdditionalConfig["min_jitter_buffer_ms"]; ok && val == "true" {
 		args = append(args, "--min-jitter-buffer-ms", val)
+	}
+
+	var fieldTrials []string
+	for key, val := range config.AdditionalConfig {
+		if strings.HasPrefix(key, "FieldTrial:") {
+			fieldTrialKey := strings.TrimPrefix(key, "FieldTrial:")
+			fieldTrials = append(fieldTrials, fieldTrialKey+"/"+val)
+		}
+	}
+	if len(fieldTrials) > 0 {
+		args = append(args, "--field-trials", strings.Join(fieldTrials, "/")+"/")
 	}
 
 	c.process = exec.Command("bin/gcc_tester", args...)
