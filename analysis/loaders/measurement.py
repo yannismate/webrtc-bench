@@ -220,6 +220,41 @@ class Measurement:
             return self.data_guard_triggers_sender.get_guard_trigger_timestamps()
         return None
 
+    def get_total_freeze_duration(self) -> float | None:
+        if self.data_parquet_receiver is not None:
+            total_freeze = self.data_parquet_receiver.get_total_freeze_duration()
+            if total_freeze is not None:
+                return total_freeze
+        return None
+
+    def get_freeze_durations_seconds(self, fps_threshold: float = 0.5, min_freeze_duration_s: int = 1) -> list[float] | None:
+        """Return a list of freeze durations (in seconds) based on recv FPS.
+
+        A freeze is defined as one or more consecutive 1-second intervals where the receive FPS
+        is less than or equal to fps_threshold. Each run of such intervals becomes one freeze event.
+        Only freeze events with duration >= min_freeze_duration_s are returned.
+        If no receive FPS is available, attempts to fall back to send FPS. Returns None if neither exists.
+        """
+        fps_series = self.get_recv_fps()
+        if fps_series is None:
+            fps_series = self.get_send_fps()
+        if fps_series is None or fps_series.empty:
+            return None
+
+        durations: list[float] = []
+        run_length = 0
+        for _, fps in fps_series.items():
+            if fps <= fps_threshold:
+                run_length += 1
+            else:
+                if run_length >= min_freeze_duration_s:
+                    durations.append(float(run_length))
+                run_length = 0
+        # Handle trailing freeze at end of series
+        if run_length >= min_freeze_duration_s:
+            durations.append(float(run_length))
+        return durations
+
     def __load_dishy_files(self):
         sender_path = os.path.join(self.folder_path, "dishy_sender.json")
         receiver_path = os.path.join(self.folder_path, "dishy_receiver.json")

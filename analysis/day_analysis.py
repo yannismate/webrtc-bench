@@ -41,6 +41,7 @@ def extract_quantiles(measurement: Measurement, resample_ms: int) -> dict:
 
 def load_results_grouped_by_hour(folder_path: str, resample_ms: int):
     result_by_hour = {}
+    freeze_durations = {}  # Track freeze durations per advanced_name
     for dir_path, dir_names, file_names in os.walk(folder_path):
         for dir_name in dir_names:
             parts = dir_name.split('-')
@@ -63,18 +64,26 @@ def load_results_grouped_by_hour(folder_path: str, resample_ms: int):
                 ms.load_files()
                 quantiles = extract_quantiles(ms, resample_ms)
                 result_by_hour[ts_key][advanced_name] = quantiles
+
+                # Collect freeze duration data
+                freeze_duration = ms.get_total_freeze_duration()
+                if freeze_duration is not None:
+                    if advanced_name not in freeze_durations:
+                        freeze_durations[advanced_name] = []
+                    freeze_durations[advanced_name].append(freeze_duration)
             except Exception as e:
                 print(f"Error loading {subfolder}: {e}")
-    return result_by_hour
+    return result_by_hour, freeze_durations
 
 
 def main():
     parser = argparse.ArgumentParser(description="Analyze and graph 24hr stats from a results folder.")
     parser.add_argument("path", help="Path to the results")
     parser.add_argument("--resample-ms", type=int, default=200, help="Interval for resampling rate graphs in ms")
+    parser.add_argument("--show-freezes", action="store_true", help="Show freeze duration distribution graph")
     args = parser.parse_args()
 
-    data = load_results_grouped_by_hour(args.path, args.resample_ms)
+    data, freeze_durations = load_results_grouped_by_hour(args.path, args.resample_ms)
 
     # Collect all advanced names
     all_advanced_names = set()
@@ -150,6 +159,40 @@ def main():
     plt.subplots_adjust(top=0.90)
     plt.savefig(os.path.join(args.path, "graph.png"), bbox_inches='tight')
     print(f"Analysis saved to {os.path.join(args.path, 'graph.png')}")
+
+    # Create second figure for freeze duration distribution (before showing)
+    if args.show_freezes and freeze_durations:
+        fig2, ax2 = plt.subplots(figsize=(max(10, int(len(ordered_advanced_names) * 1.5)), 6))
+
+        # Prepare data for boxplot
+        freeze_data = []
+        freeze_labels = []
+        for name in ordered_advanced_names:
+            if name in freeze_durations and freeze_durations[name]:
+                freeze_data.append(freeze_durations[name])
+                freeze_labels.append(name)
+
+        if freeze_data:
+            # Create boxplot
+            bp = ax2.boxplot(freeze_data, tick_labels=freeze_labels, patch_artist=True)
+
+            # Customize boxplot appearance
+            for patch in bp['boxes']:
+                patch.set_facecolor('lightblue')
+
+            ax2.set_xlabel("Advanced Name", fontsize=12)
+            ax2.set_ylabel("Total Freeze Duration (seconds)", fontsize=12)
+            ax2.set_title("Distribution of Total Freeze Duration by Advanced Name", fontsize=14)
+            ax2.tick_params(axis='x', rotation=45)
+            ax2.grid(axis='y', alpha=0.3)
+
+            plt.tight_layout()
+            plt.savefig(os.path.join(args.path, "freeze_duration_graph.png"), bbox_inches='tight')
+            print(f"Freeze duration analysis saved to {os.path.join(args.path, 'freeze_duration_graph.png')}")
+        else:
+            print("No freeze duration data available to plot.")
+
+    # Show all figures at once
     plt.show()
 
 if __name__ == "__main__":

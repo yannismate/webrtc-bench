@@ -138,6 +138,11 @@ class ParquetData:
         fps.name = "recv_fps"
         return fps
 
+    def get_total_freeze_duration(self) -> float | None:
+        if "InboundRTP.FramesReceived" not in self.data:
+            return None
+        return self.data['InboundRTP.TotalFreezesDuration'].iloc[-1]
+
 def parquet_from_file(file_path: str) -> ParquetData | None:
     print("Loading Parquet data from file:", file_path)
     if not os.path.exists(file_path):
