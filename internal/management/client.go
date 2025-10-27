@@ -384,7 +384,6 @@ func (c *client) startObstructionMapTracking() {
 				return
 			case <-ticker.C:
 				if n == 0 {
-					log.Debug().Msg("Resetting obstruction map")
 					ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 					// reset obstruction map every 14 seconds
 					_, err := c.dishyClient.Handle(ctx, &dishy.Request{
@@ -397,7 +396,6 @@ func (c *client) startObstructionMapTracking() {
 					}
 				}
 
-				log.Debug().Msg("Fetching current obstruction map")
 				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 				// reset obstruction map every 14 seconds
 				res, err := c.dishyClient.Handle(ctx, &dishy.Request{
@@ -651,11 +649,12 @@ func printProcesses() {
 			pPath, err := p.Exe()
 			if err != nil {
 				log.Error().Err(err).Msg("Could not get process exe")
-				continue
+				pPath = "unknown"
 			}
 			pTime, err := p.CreateTime()
 			if err != nil {
 				log.Error().Err(err).Msg("Could not get process creation time")
+				log.Info().Msgf("  - %s (%v) [unknown start time]", pPath, p.Pid)
 				continue
 			}
 			pTimeParsed := time.Unix(0, int64(time.Millisecond)*pTime)
