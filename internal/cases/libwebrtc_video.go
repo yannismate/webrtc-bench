@@ -317,6 +317,9 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 				return
 			}
 			line := c.stderrReader.Text()
+			if strings.Contains(line, "iContinualSkipFrames(") {
+				continue
+			}
 			if strings.HasPrefix(line, "(") {
 				log.Debug().Msgf("[libwebrtc] stderr: %s", line)
 			} else {

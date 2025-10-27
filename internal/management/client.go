@@ -313,6 +313,7 @@ func (c *client) Start() {
 					}
 				}
 
+				time.Sleep(100 * time.Millisecond)
 				log.Info().Msg("Processes running after case shutdown:")
 				printProcesses()
 
@@ -648,7 +649,13 @@ func printProcesses() {
 		for _, p := range processes {
 			pPath, err := p.Exe()
 			if err != nil {
-				log.Error().Err(err).Msg("Could not get process exe")
+				log.Error().Err(err).Msgf("Could not get process exe")
+				if name, err := p.Name(); err == nil {
+					log.Info().Msgf("Process name: %s", name)
+				}
+				if status, err := p.Status(); err == nil {
+					log.Info().Msgf("Process status: %s", status)
+				}
 				pPath = "unknown"
 			}
 			pTime, err := p.CreateTime()
