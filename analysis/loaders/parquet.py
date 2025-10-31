@@ -138,10 +138,23 @@ class ParquetData:
         fps.name = "recv_fps"
         return fps
 
-    def get_total_freeze_duration(self) -> float | None:
-        if "InboundRTP.FramesReceived" not in self.data:
+    def get_freeze_times(self) -> pd.Series | None:
+        if "InboundRTP.FreezeCount" not in self.data:
             return None
-        return self.data['InboundRTP.TotalFreezesDuration'].iloc[-1]
+        freezes = self.data["InboundRTP.FreezeCount"].diff().fillna(0)
+        freeze_times = freezes[freezes > 0]
+        freeze_times.index.name = 'Timestamp'
+        freeze_times.name = "freeze_count"
+        return freeze_times
+
+    def get_total_freeze_duration(self) -> float | None:
+        if "InboundRTP.TotalFreezesDuration" not in self.data:
+            return None
+        # Ignore freezes during the first 30 seconds of the call during startup
+        first_ts = self.data.index[0]
+        startup_end = first_ts + pd.Timedelta(seconds=30)
+        startup_freeze = self.data[self.data.index <= startup_end]['InboundRTP.TotalFreezesDuration'].iloc[-1]
+        return self.data['InboundRTP.TotalFreezesDuration'].iloc[-1] - startup_freeze
 
 def parquet_from_file(file_path: str) -> ParquetData | None:
     print("Loading Parquet data from file:", file_path)

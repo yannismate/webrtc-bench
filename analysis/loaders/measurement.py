@@ -220,6 +220,13 @@ class Measurement:
             return self.data_guard_triggers_sender.get_guard_trigger_timestamps()
         return None
 
+    def get_freeze_times(self) -> pd.Series | None:
+        if self.data_parquet_receiver is not None:
+            freeze_times = self.data_parquet_receiver.get_freeze_times()
+            if freeze_times is not None:
+                return freeze_times
+        return None
+
     def get_total_freeze_duration(self) -> float | None:
         if self.data_parquet_receiver is not None:
             total_freeze = self.data_parquet_receiver.get_total_freeze_duration()

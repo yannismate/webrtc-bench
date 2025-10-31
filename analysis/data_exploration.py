@@ -36,6 +36,7 @@ def main():
     icmp_pings = ms.get_icmp_pings()
     send_fps = ms.get_send_fps() if args.plot_fps else None
     recv_fps = ms.get_recv_fps() if args.plot_fps else None
+    freeze_times = ms.get_freeze_times() if args.plot_fps else None
     probe_timestamps = ms.get_probe_timestamps()
     guard_trigger_timestamps = ms.get_guard_trigger_timestamps()
     num_plots = 3 \
@@ -148,6 +149,13 @@ def main():
         ax_fps.set_title('FPS Over Time')
         ax_fps.grid(True)
         ax_fps.legend()
+        # Add vertical lines for freeze events
+        if freeze_times is not None and not freeze_times.empty:
+            for i, ts in enumerate(freeze_times.index):
+                label = "Freeze" if i == 0 else None
+                ax_fps.axvline(ts, color='red', linestyle='--', linewidth=1.0, alpha=0.7, label=label)
+            # Update legend if freeze lines were added
+            ax_fps.legend()
 
     # Plot congestion states (if available) as colored timelines per column
     if cong_states is not None and ax_states is not None and not cong_states.empty:
