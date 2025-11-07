@@ -9,6 +9,7 @@ import (
 	"io"
 	"iter"
 	"maps"
+	"net/http"
 	"os"
 	"path"
 	"sync"
@@ -108,7 +109,7 @@ func main() {
 			}
 			server.SetCurrentResultPath(resultsPath)
 
-			caseFile, err := os.Create(path.Join(resultsPath, fmt.Sprintf("case.json")))
+			caseFile, err := os.Create(path.Join(resultsPath, "case.json"))
 			if err != nil {
 				log.Fatal().Err(err).Msg("Failed to open case.json")
 				return
@@ -127,6 +128,13 @@ func main() {
 			}
 
 			_ = caseFile.Close()
+
+			if testCases[currentCase].ExternalDataSources != nil {
+				log.Info().Msgf("Fetching external data source")
+				for sourceName, sourceUrl := range *testCases[currentCase].ExternalDataSources {
+					fetchExternalSource(path.Join(resultsPath, sourceName), sourceUrl)
+				}
+			}
 
 			log.Info().Msg("Configuring clients")
 			for name, peerConfig := range testCases[currentCase].PeerConfigs {
@@ -187,4 +195,37 @@ func allTestClientsInState(states map[string]management.ClientState, requiredCli
 		}
 	}
 	return true
+}
+
+func fetchExternalSource(resultPath string, url string) {
+	log.Info().Msgf("Fetching external source: %s", url)
+	dataFile, err := os.Create(resultPath)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to open external source result file")
+	}
+
+	defer dataFile.Close()
+
+	res, err := http.Get(url)
+	if err != nil {
+		log.Error().Err(err).Msgf("Failed to fetch external source: %s", url)
+		_, err := dataFile.WriteString(err.Error())
+		if err != nil {
+			log.Fatal().Err(err).Msg("Failed to write error to external source result file")
+		}
+		return
+	}
+	if res.StatusCode != 200 {
+		log.Error().Msgf("Failed to fetch external source (Status %s [%d])", res.Status, res.StatusCode)
+		_, err := dataFile.WriteString(fmt.Sprintf("Failed to fetch external source (Status %s [%d])", res.Status, res.StatusCode))
+		if err != nil {
+			log.Fatal().Err(err).Msg("Failed to write status code error to external source result file")
+		}
+	}
+
+	_, err = dataFile.ReadFrom(res.Body)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to write result to external source result file")
+	}
+	log.Info().Msgf("Successfully fetched external source: %s", url)
 }

@@ -25,7 +25,8 @@ FROM debian:13
 WORKDIR /root
 ADD testdata /root/testdata
 RUN apt update && apt install -y libglib2.0-0 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libxcomposite1 libxdamage1 \
-    libxfixes3 libnss3 libxrandr2 libgbm1 libxkbcommon0 libasound2 iproute2 iperf3 ffmpeg libopenh264-dev libopenh264-8
+    libxfixes3 libnss3 libxrandr2 libgbm1 libxkbcommon0 libasound2 iproute2 iperf3 ffmpeg libopenh264-dev libopenh264-8 \
+    ca-certificates
 
 COPY --from=chrome-download /tmp/headless-shell /opt/headless-shell
 RUN ln -s /opt/headless-shell/chrome-headless-shell /opt/headless-shell/headless-shell

@@ -14,10 +14,11 @@ const (
 )
 
 type Case struct {
-	Name        string
-	PeerConfigs map[string]PeerCaseConfig
-	CaseType    CaseType
-	Duration    util.JSONDuration
+	Name                string
+	PeerConfigs         map[string]PeerCaseConfig
+	CaseType            CaseType
+	Duration            util.JSONDuration
+	ExternalDataSources *map[string]string
 }
 
 type PeerCaseExecutor interface {
