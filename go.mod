@@ -5,8 +5,8 @@ go 1.24.0
 toolchain go1.24.7
 
 require (
-	github.com/chromedp/cdproto v0.0.0-20250530212709-4dcc110a7b92
-	github.com/chromedp/chromedp v0.13.6
+	github.com/chromedp/cdproto v0.0.0-20250803210736-d308e07a266d
+	github.com/chromedp/chromedp v0.14.2
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/mengelbart/scream-go v0.4.0
@@ -26,7 +26,7 @@ require (
 	github.com/andybalholm/brotli v1.1.0 // indirect
 	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/ebitengine/purego v0.9.0 // indirect
-	github.com/go-json-experiment/json v0.0.0-20250211171154-1ae217ad3535 // indirect
+	github.com/go-json-experiment/json v0.0.0-20250725192818-e39067aee2d2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-ping/ping v1.2.0 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect

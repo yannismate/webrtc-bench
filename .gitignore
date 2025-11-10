@@ -5,3 +5,4 @@
 .vscode
 dtls.txt
 teams_credentials.json
+__pycache__
