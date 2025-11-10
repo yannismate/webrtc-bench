@@ -9,6 +9,7 @@ from loaders.iperf import iperf_from_file, IPerfData
 from loaders.irtt import IrttData, irtt_from_file
 from loaders.parquet import ParquetData, parquet_from_file
 from loaders.probes import ProbeData, probes_from_file
+from loaders.weather import WeatherData, weather_data_from_file
 
 
 class MeasurementType(Enum):
@@ -31,6 +32,7 @@ class Measurement:
     data_icmp_sender: IcmpPingData | None = None
     data_probes_sender: ProbeData | None = None
     data_guard_triggers_sender: GuardTriggerData | None = None
+    weather_data: WeatherData | None = None
 
     def __init__(self, folder_path: str = None):
         if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
@@ -70,6 +72,7 @@ class Measurement:
         self.__load_parquet_files()
         self.__load_probes_files()
         self.__load_guard_trigger_files()
+        self.__load_weather_data()
 
     def get_send_bitrate_kbps(self, resample_ms: int = 200) -> pd.Series | None:
         if self.data_parquet_sender is not None:
@@ -305,3 +308,8 @@ class Measurement:
         sender_path = os.path.join(self.folder_path, "guard_triggers.json")
         if os.path.exists(sender_path):
             self.data_guard_triggers_sender = guard_triggers_from_file(sender_path)
+
+    def __load_weather_data(self):
+        weather_path = os.path.join(self.folder_path, "weather.html")
+        if os.path.exists(weather_path):
+            self.weather_data = weather_data_from_file(weather_path)

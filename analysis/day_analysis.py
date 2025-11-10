@@ -42,6 +42,7 @@ def extract_quantiles(measurement: Measurement, resample_ms: int) -> dict:
 def load_results_grouped_by_hour(folder_path: str, resample_ms: int):
     result_by_hour = {}
     freeze_durations = {}  # Track freeze durations per advanced_name
+    weather_by_hour = {}   # Track weather per hour
     for dir_path, dir_names, file_names in os.walk(folder_path):
         for dir_name in dir_names:
             parts = dir_name.split('-')
@@ -71,9 +72,13 @@ def load_results_grouped_by_hour(folder_path: str, resample_ms: int):
                     if advanced_name not in freeze_durations:
                         freeze_durations[advanced_name] = []
                     freeze_durations[advanced_name].append(freeze_duration)
+
+                # Record weather data (one snapshot per hour). Prefer first encountered.
+                if ts_key not in weather_by_hour and ms.weather_data is not None:
+                    weather_by_hour[ts_key] = ms.weather_data
             except Exception as e:
                 print(f"Error loading {subfolder}: {e}")
-    return result_by_hour, freeze_durations
+    return result_by_hour, freeze_durations, weather_by_hour
 
 
 def main():
@@ -81,9 +86,10 @@ def main():
     parser.add_argument("path", help="Path to the results")
     parser.add_argument("--resample-ms", type=int, default=200, help="Interval for resampling rate graphs in ms")
     parser.add_argument("--show-freezes", action="store_true", help="Show freeze duration distribution graph")
+    parser.add_argument("--show-weather", action="store_true", help="Show current weather metrics graph")
     args = parser.parse_args()
 
-    data, freeze_durations = load_results_grouped_by_hour(args.path, args.resample_ms)
+    data, freeze_durations, weather_by_hour = load_results_grouped_by_hour(args.path, args.resample_ms)
 
     # Collect all advanced names
     all_advanced_names = set()
@@ -191,6 +197,46 @@ def main():
             print(f"Freeze duration analysis saved to {os.path.join(args.path, 'freeze_duration_graph.png')}")
         else:
             print("No freeze duration data available to plot.")
+
+    # Weather metrics figure (third window) if requested
+    if args.show_weather and weather_by_hour:
+        # Sort timestamps
+        w_ts = sorted(weather_by_hour.keys())
+        w_dt_labels = [datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M') for ts in w_ts]
+
+        # Prepare data lists (skip None values)
+        global_vals = [(weather_by_hour[ts].global_solar_radiation_w_m2, ts) for ts in w_ts]
+        atmos_vals = [(weather_by_hour[ts].atmospheric_counter_radiation_w_m2, ts) for ts in w_ts]
+        longwave_vals = [(weather_by_hour[ts].longwave_outgoing_radiation_w_m2, ts) for ts in w_ts]
+        humidity_vals = [(weather_by_hour[ts].average_relative_humidity_percent, ts) for ts in w_ts]
+        precip_vals = [(weather_by_hour[ts].current_precip_mm_per_min, ts) for ts in w_ts]
+
+        metric_specs = [
+            ("Global Solar Rad (W/m^2)", global_vals),
+            ("Atmospheric Counter Rad (W/m^2)", atmos_vals),
+            ("Longwave Outgoing Rad (W/m^2)", longwave_vals),
+            ("Avg Relative Humidity (%)", humidity_vals),
+            ("Current Precip (mm/min)", precip_vals),
+        ]
+
+        fig3, axes3 = plt.subplots(len(metric_specs), 1, figsize=(12, 3 * len(metric_specs)), sharex=True)
+        if len(metric_specs) == 1:
+            axes3 = [axes3]
+
+        for ax, (title, values) in zip(axes3, metric_specs):
+            filtered = [(val, ts) for val, ts in values if val is not None]
+            if not filtered:
+                ax.set_title(f"{title} (no data)")
+                ax.set_visible(True)
+                continue
+            y = [v for v, _ in filtered]
+            ts_list = [datetime.fromtimestamp(t) for _, t in filtered]
+            ax.plot(ts_list, y, marker='o')
+            ax.set_ylabel(title)
+            ax.grid(alpha=0.3)
+        axes3[-1].set_xlabel("Time (Hour)")
+        fig3.autofmt_xdate(rotation=45)
+        fig3.suptitle("Weather Metrics Over Time", y=0.98)
 
     # Show all figures at once
     plt.show()
