@@ -216,6 +216,7 @@ func (c *CaseVideoTeams) SetupTeamsReceiver() error {
 	if err != nil {
 		return err
 	}
+	log.Debug().Msg("Set up emulated credential...")
 
 	err = chromedp.Run(c.browserContext,
 		chromedp.SendKeys("input[name=\"loginfmt\"]", c.teamsCredential.Email),
@@ -224,6 +225,8 @@ func (c *CaseVideoTeams) SetupTeamsReceiver() error {
 		chromedp.WaitVisible("button[type=submit]"),
 		chromedp.Click("button[type=submit]"),
 		chromedp.WaitVisible("#idna-me-control-avatar-trigger"))
+
+	log.Debug().Msg("Teams sign-in succeeded!")
 
 	err = chromedp.Run(c.browserContext,
 		chromedp.ActionFunc(func(ctx context.Context) error {
@@ -255,12 +258,20 @@ func (c *CaseVideoTeams) SetupTeamsReceiver() error {
 		chromedp.WaitVisible("button[data-tid=\"joinOnWeb\"]"),
 		chromedp.Click("button[data-tid=\"joinOnWeb\"]"),
 		chromedp.WaitVisible("#prejoin-join-button"),
-		chromedp.Click("#prejoin-join-button"),
+		chromedp.Click("#prejoin-join-button"))
+
+	if err != nil {
+		return err
+	}
+	log.Debug().Msg("Joined meeting.")
+
+	err = chromedp.Run(c.browserContext,
 		chromedp.WaitVisible("div[data-tid=\"voice-level-stream-outline\"]"))
 
 	if err != nil {
 		return err
 	}
+	log.Debug().Msg("Sender connected!")
 
 	return nil
 }
@@ -275,11 +286,19 @@ func (c *CaseVideoTeams) SetupTeamsSender() error {
 		chromedp.WaitVisible("input[data-tid=\"prejoin-display-name-input\""),
 		chromedp.SendKeys("input[data-tid=\"prejoin-display-name-input\"", "TestSender"),
 		chromedp.WaitVisible("#prejoin-join-button"),
-		chromedp.Click("#prejoin-join-button"),
+		chromedp.Click("#prejoin-join-button"))
+	if err != nil {
+		return err
+	}
+
+	log.Debug().Msg("Joined meeting as sender.")
+
+	err = chromedp.Run(c.browserContext,
 		chromedp.WaitVisible("div[data-tid=\"voice-level-stream-outline\"]"))
 	if err != nil {
 		return err
 	}
+	log.Debug().Msg("Receiver connected!")
 
 	return nil
 }
