@@ -5,6 +5,8 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"github.com/chromedp/cdproto/cdp"
+	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/webauthn"
 	"github.com/chromedp/chromedp/kb"
@@ -63,7 +65,7 @@ func (c *CaseVideoTeams) Configure(config PeerCaseConfig, sendSignal func(signal
 
 	videoFilePath, ok := config.AdditionalConfig["video_file"]
 	if !ok {
-		videoFilePath = path.Join(cwd, "testdata", "test.y4m")
+		videoFilePath = path.Join(cwd, "testdata", "test.mjpeg")
 	}
 
 	if meetingUrl, ok := config.AdditionalConfig["meeting_url"]; ok {
@@ -152,6 +154,12 @@ func (c *CaseVideoTeams) Configure(config PeerCaseConfig, sendSignal func(signal
 			}()
 		}
 	})
+	err = chromedp.Run(c.browserContext,
+		chromedp.Sleep(time.Millisecond),
+		emulation.SetDeviceMetricsOverride(int64(1905), int64(945), 1.0, false))
+	if err != nil {
+		return err
+	}
 
 	if config.SendOffer {
 		err := c.SetupTeamsSender()
@@ -173,7 +181,7 @@ func (c *CaseVideoTeams) Configure(config PeerCaseConfig, sendSignal func(signal
 func (c *CaseVideoTeams) SetupTeamsReceiver() error {
 	log.Debug().Msg("Setting up teams meeting receiver...")
 
-	timeoutContext, cancel := context.WithTimeout(c.browserContext, time.Duration(1)*time.Minute)
+	timeoutContext, cancel := context.WithTimeout(c.browserContext, time.Duration(3)*time.Minute)
 	defer cancel()
 
 	var authId webauthn.AuthenticatorID
@@ -236,7 +244,7 @@ func (c *CaseVideoTeams) SetupTeamsReceiver() error {
 			creds, err := webauthn.GetCredentials(authId).Do(ctx)
 			if err == nil {
 				newSignCount := creds[0].SignCount
-				log.Info().Msgf("New sign count: %v", newSignCount)
+				log.Debug().Msgf("New sign count: %v", newSignCount)
 				c.teamsCredential.SignCount = newSignCount
 
 				updatedJsonBytes, err := json.MarshalIndent(c.teamsCredential, "", "  ")
@@ -255,11 +263,38 @@ func (c *CaseVideoTeams) SetupTeamsReceiver() error {
 			}
 			return err
 		}))
+	if err != nil {
+		return err
+	}
 
 	err = chromedp.Run(timeoutContext,
-		chromedp.Navigate(c.meetingUrl),
-		chromedp.WaitVisible("button[data-tid=\"joinOnWeb\"]"),
-		chromedp.Click("button[data-tid=\"joinOnWeb\"]"),
+		chromedp.Navigate(c.meetingUrl))
+	if err != nil {
+		return err
+	}
+
+	log.Debug().Msg("Meeting page loaded.")
+
+	err = chromedp.Run(timeoutContext,
+		chromedp.WaitVisible("button[data-tid=\"joinOnWeb\"],#prejoin-join-button"),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			var nodes []*cdp.Node
+			err := chromedp.Nodes("button[data-tid=\"joinOnWeb\"]", &nodes, chromedp.AtLeast(0)).Do(ctx)
+			if err != nil {
+				return err
+			}
+			if len(nodes) == 0 {
+				log.Debug().Msg("Meeting native join page skipped.")
+				return nil
+			}
+			log.Debug().Msg("Clicking 'join on browser'.")
+			return chromedp.MouseClickNode(nodes[0]).Do(ctx)
+		}))
+	if err != nil {
+		return err
+	}
+
+	err = chromedp.Run(timeoutContext,
 		chromedp.WaitVisible("#prejoin-join-button"),
 		chromedp.Click("#prejoin-join-button"))
 
@@ -282,29 +317,46 @@ func (c *CaseVideoTeams) SetupTeamsReceiver() error {
 func (c *CaseVideoTeams) SetupTeamsSender() error {
 	log.Debug().Msg("Setting up teams meeting sender...")
 
-	timeoutContext, cancel := context.WithTimeout(c.browserContext, time.Duration(1)*time.Minute)
+	timeoutContext, cancel := context.WithTimeout(c.browserContext, time.Duration(3)*time.Minute)
 	defer cancel()
 
 	err := chromedp.Run(timeoutContext,
-		chromedp.Navigate(c.meetingUrl),
-		chromedp.WaitVisible("button[data-tid=\"joinOnWeb\"]"),
-		chromedp.Click("button[data-tid=\"joinOnWeb\"]"),
+		chromedp.Navigate(c.meetingUrl))
+	if err != nil {
+		return err
+	}
+
+	log.Debug().Msg("Meeting page loaded.")
+
+	err = chromedp.Run(timeoutContext,
+		chromedp.WaitVisible("button[data-tid=\"joinOnWeb\"],#prejoin-join-button"),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			var nodes []*cdp.Node
+			err := chromedp.Nodes("button[data-tid=\"joinOnWeb\"]", &nodes, chromedp.AtLeast(0)).Do(ctx)
+			if err != nil {
+				return err
+			}
+			if len(nodes) == 0 {
+				log.Debug().Msg("Meeting native join page skipped.")
+				return nil
+			}
+			log.Debug().Msg("Clicking 'join on browser'.")
+			return chromedp.MouseClickNode(nodes[0]).Do(ctx)
+		}))
+	if err != nil {
+		return err
+	}
+
+	err = chromedp.Run(timeoutContext,
 		chromedp.WaitVisible("input[data-tid=\"prejoin-display-name-input\""),
-		chromedp.SendKeys("input[data-tid=\"prejoin-display-name-input\"", "TestSender"),
 		chromedp.WaitVisible("#prejoin-join-button"),
+		chromedp.SendKeys("input[data-tid=\"prejoin-display-name-input\"", "TestSender"),
 		chromedp.Click("#prejoin-join-button"))
 	if err != nil {
 		return err
 	}
 
 	log.Debug().Msg("Joined meeting as sender.")
-
-	err = chromedp.Run(timeoutContext,
-		chromedp.WaitVisible("div[data-tid=\"voice-level-stream-outline\"]"))
-	if err != nil {
-		return err
-	}
-	log.Debug().Msg("Receiver connected!")
 
 	return nil
 }

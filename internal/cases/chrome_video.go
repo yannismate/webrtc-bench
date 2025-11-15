@@ -45,7 +45,7 @@ func (c *CaseVideoChrome) Configure(config PeerCaseConfig, sendSignal func(signa
 
 	videoFilePath, ok := config.AdditionalConfig["video_file"]
 	if !ok {
-		videoFilePath = path.Join(cwd, "testdata", "test.y4m")
+		videoFilePath = path.Join(cwd, "testdata", "test.mjpeg")
 	}
 	log.Debug().Msgf("Using video source from %s", videoFilePath)
 

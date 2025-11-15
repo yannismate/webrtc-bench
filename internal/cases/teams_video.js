@@ -14,18 +14,17 @@ function getPeerConnection() {
         log("Error getting peer connection, no peer connection found!");
         throw new Error("Error getting peer connection, no peer connection found!");
     }
+    if (rtcPeerConnections.length > 1) {
+        log("There is more than one peer connection! Returning latest one.");
+    }
     return rtcPeerConnections[rtcPeerConnections.length - 1];
 }
 
-let peerConnection;
 setInterval(async () => {
-    if (!peerConnection) {
-        peerConnection = getPeerConnection();
-    }
-    const allStats = await peerConnection.getStats()
+    const allStats = await getPeerConnection().getStats()
     const statData = {};
     allStats.forEach(stats => {
-        if (stats.type === "inbound-rtp" && stats.kind === "video") {
+        if (stats.type === "inbound-rtp" && stats.kind === "video" && stats.bytesReceived > 0) {
             statData.timestamp = new Date(Math.round(stats.timestamp)).toISOString();
             if (!statData.inboundRtp) {
                 statData.inboundRtp = {};
@@ -46,7 +45,7 @@ setInterval(async () => {
             statData.inboundRtp.totalFreezesDuration = stats.totalFreezesDuration;
             statData.inboundRtp.retransmittedBytesReceived = stats.retransmittedBytesReceived;
             statData.inboundRtp.retransmittedPacketsReceived = stats.retransmittedPacketsReceived;
-        } else if (stats.type === "outbound-rtp" && stats.kind === "video") {
+        } else if (stats.type === "outbound-rtp" && stats.kind === "video" && stats.bytesSent > 0) {
             statData.timestamp = new Date(Math.round(stats.timestamp)).toISOString();
             statData.outboundRtp = {
                 packetsSent: stats.packetsSent,
