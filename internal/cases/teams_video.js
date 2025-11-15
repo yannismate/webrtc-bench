@@ -25,7 +25,7 @@ setInterval(async () => {
     const allStats = await peerConnection.getStats()
     const statData = {};
     allStats.forEach(stats => {
-        if (stats.type === "inbound-rtp") {
+        if (stats.type === "inbound-rtp" && stats.kind === "video") {
             statData.timestamp = new Date(Math.round(stats.timestamp)).toISOString();
             if (!statData.inboundRtp) {
                 statData.inboundRtp = {};
@@ -46,7 +46,7 @@ setInterval(async () => {
             statData.inboundRtp.totalFreezesDuration = stats.totalFreezesDuration;
             statData.inboundRtp.retransmittedBytesReceived = stats.retransmittedBytesReceived;
             statData.inboundRtp.retransmittedPacketsReceived = stats.retransmittedPacketsReceived;
-        } else if (stats.type === "outbound-rtp") {
+        } else if (stats.type === "outbound-rtp" && stats.kind === "video") {
             statData.timestamp = new Date(Math.round(stats.timestamp)).toISOString();
             statData.outboundRtp = {
                 packetsSent: stats.packetsSent,
@@ -58,12 +58,12 @@ setInterval(async () => {
                 framesSent: stats.framesSent,
                 targetBitrate: stats.targetBitrate
             };
-        } else if (stats.type === "remote-inbound-rtp") {
+        } else if (stats.type === "remote-inbound-rtp" && stats.kind === "video") {
             if (!statData.outboundRtp) {
                 statData.outboundRtp = {};
             }
             statData.outboundRtp.roundTripTime = stats.roundTripTime;
-        } else if (stats.type === "remote-outbound-rtp") {
+        } else if (stats.type === "remote-outbound-rtp" && stats.kind === "video") {
             if (!statData.inboundRtp) {
                 statData.inboundRtp = {};
             }

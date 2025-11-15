@@ -37,6 +37,7 @@ const (
 	PeerImplementationChrome    PeerImplementation = "chrome"
 	PeerImplementationLibWebRTC PeerImplementation = "libwebrtc"
 	PeerImplementationIPerf     PeerImplementation = "iperf"
+	PeerImplementationTeams     PeerImplementation = "teams"
 )
 
 type PeerCaseConfig struct {

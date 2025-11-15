@@ -173,16 +173,19 @@ func (c *CaseVideoTeams) Configure(config PeerCaseConfig, sendSignal func(signal
 func (c *CaseVideoTeams) SetupTeamsReceiver() error {
 	log.Debug().Msg("Setting up teams meeting receiver...")
 
+	timeoutContext, cancel := context.WithTimeout(c.browserContext, time.Duration(1)*time.Minute)
+	defer cancel()
+
 	var authId webauthn.AuthenticatorID
 
-	err := chromedp.Run(c.browserContext,
+	err := chromedp.Run(timeoutContext,
 		chromedp.Navigate(TeamsLoginUrl),
 		chromedp.WaitVisible("input[name=\"loginfmt\"]"))
 	if err != nil {
 		return err
 	}
 
-	err = chromedp.Run(c.browserContext,
+	err = chromedp.Run(timeoutContext,
 		webauthn.Enable(),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			aid, err := webauthn.AddVirtualAuthenticator(&webauthn.VirtualAuthenticatorOptions{
@@ -203,7 +206,7 @@ func (c *CaseVideoTeams) SetupTeamsReceiver() error {
 		return err
 	}
 
-	err = chromedp.Run(c.browserContext,
+	err = chromedp.Run(timeoutContext,
 		webauthn.SetAutomaticPresenceSimulation(authId, true),
 		webauthn.AddCredential(authId, &webauthn.Credential{
 			CredentialID:         c.teamsCredential.CredentialId,
@@ -218,7 +221,7 @@ func (c *CaseVideoTeams) SetupTeamsReceiver() error {
 	}
 	log.Debug().Msg("Set up emulated credential...")
 
-	err = chromedp.Run(c.browserContext,
+	err = chromedp.Run(timeoutContext,
 		chromedp.SendKeys("input[name=\"loginfmt\"]", c.teamsCredential.Email),
 		chromedp.SendKeys("input[name=\"loginfmt\"]", kb.Enter),
 		chromedp.Sleep(5*time.Second),
@@ -228,7 +231,7 @@ func (c *CaseVideoTeams) SetupTeamsReceiver() error {
 
 	log.Debug().Msg("Teams sign-in succeeded!")
 
-	err = chromedp.Run(c.browserContext,
+	err = chromedp.Run(timeoutContext,
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			creds, err := webauthn.GetCredentials(authId).Do(ctx)
 			if err == nil {
@@ -253,7 +256,7 @@ func (c *CaseVideoTeams) SetupTeamsReceiver() error {
 			return err
 		}))
 
-	err = chromedp.Run(c.browserContext,
+	err = chromedp.Run(timeoutContext,
 		chromedp.Navigate(c.meetingUrl),
 		chromedp.WaitVisible("button[data-tid=\"joinOnWeb\"]"),
 		chromedp.Click("button[data-tid=\"joinOnWeb\"]"),
@@ -265,7 +268,7 @@ func (c *CaseVideoTeams) SetupTeamsReceiver() error {
 	}
 	log.Debug().Msg("Joined meeting.")
 
-	err = chromedp.Run(c.browserContext,
+	err = chromedp.Run(timeoutContext,
 		chromedp.WaitVisible("div[data-tid=\"voice-level-stream-outline\"]"))
 
 	if err != nil {
@@ -279,7 +282,10 @@ func (c *CaseVideoTeams) SetupTeamsReceiver() error {
 func (c *CaseVideoTeams) SetupTeamsSender() error {
 	log.Debug().Msg("Setting up teams meeting sender...")
 
-	err := chromedp.Run(c.browserContext,
+	timeoutContext, cancel := context.WithTimeout(c.browserContext, time.Duration(1)*time.Minute)
+	defer cancel()
+
+	err := chromedp.Run(timeoutContext,
 		chromedp.Navigate(c.meetingUrl),
 		chromedp.WaitVisible("button[data-tid=\"joinOnWeb\"]"),
 		chromedp.Click("button[data-tid=\"joinOnWeb\"]"),
@@ -293,7 +299,7 @@ func (c *CaseVideoTeams) SetupTeamsSender() error {
 
 	log.Debug().Msg("Joined meeting as sender.")
 
-	err = chromedp.Run(c.browserContext,
+	err = chromedp.Run(timeoutContext,
 		chromedp.WaitVisible("div[data-tid=\"voice-level-stream-outline\"]"))
 	if err != nil {
 		return err

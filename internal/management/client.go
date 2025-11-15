@@ -168,8 +168,10 @@ func (c *client) Start() {
 					return
 				}
 				c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateConfiguring})
-				c.configureCase(innerMsg)
-				c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateTestReady})
+				go func() {
+					c.configureCase(innerMsg)
+					c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateTestReady})
+				}()
 			case MessageTypeStartCaseExecution:
 				if c.CurrentCase == nil {
 					log.Error().Msg("Cannot start execution, no case configured!")
@@ -537,6 +539,11 @@ func (c *client) configureCase(configMsg MessageConfigureClient) {
 			log.Fatal().Msgf("Unrecognized caseType: %s", configMsg.CaseType)
 		}
 		c.CurrentCase = &cases.CaseIPerfUDP{Duration: time.Duration(configMsg.CaseDuration)}
+	} else if configMsg.Config.Implementation == cases.PeerImplementationTeams {
+		if configMsg.CaseType != cases.CaseTypeVideo {
+			log.Fatal().Msgf("Unrecognized caseType: %s", configMsg.CaseType)
+		}
+		c.CurrentCase = &cases.CaseVideoTeams{}
 	} else {
 		log.Fatal().Msgf("Unrecognized implementation type: %s", configMsg.CaseType)
 	}
