@@ -1,9 +1,3 @@
-FROM node:24 AS chrome-download
-
-WORKDIR /tmp
-RUN npx --yes @puppeteer/browsers install chrome-headless-shell@stable
-RUN mv ./chrome-headless-shell/linux-*/chrome-headless-shell-linux64 ./headless-shell
-
 FROM golang:1.24 AS build
 
 WORKDIR /go/src
@@ -21,18 +15,19 @@ RUN go build -o /go/bin/peer cmd/peer/peer.go
 
 
 FROM debian:13
+ARG TARGETARCH
 
+ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /root
 ADD testdata /root/testdata
-RUN apt update && apt install -y libglib2.0-0 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libxcomposite1 libxdamage1 \
+RUN apt-get update && apt-get install -y libglib2.0-0 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libxcomposite1 libxdamage1 \
     libxfixes3 libnss3 libxrandr2 libgbm1 libxkbcommon0 libasound2 iproute2 iperf3 ffmpeg libopenh264-dev libopenh264-8 \
-    ca-certificates
+    ca-certificates chromium-headless-shell libavcodec-extra
 
-COPY --from=chrome-download /tmp/headless-shell /opt/headless-shell
-RUN ln -s /opt/headless-shell/chrome-headless-shell /opt/headless-shell/headless-shell
-ENV PATH="$PATH:/opt/headless-shell"
+RUN ln -s $(which chromium-headless-shell) /usr/bin/headless-shell
 COPY --from=build /go/bin /bin
-ADD bin /root/bin
+ADD bin/gcc_tester_${TARGETARCH} /root/bin/gcc_tester
 RUN mv /bin/irtt /root/bin/irtt
+
 
 CMD ["/bin/peer", "--server", "135.220.32.39:8080", "--name", "sender", "--v"]

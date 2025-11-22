@@ -20,7 +20,14 @@ function getPeerConnection() {
     return rtcPeerConnections[rtcPeerConnections.length - 1];
 }
 
+var hasOutputtedSDP = false;
 setInterval(async () => {
+    if (!hasOutputtedSDP) {
+        const pc = getPeerConnection();
+        const sdp = pc.currentRemoteDescription.sdp;
+        sendManagementMessage(JSON.stringify({type: "remote-sdp", value: sdp}))
+        hasOutputtedSDP = true;
+    }
     const allStats = await getPeerConnection().getStats()
     const statData = {};
     allStats.forEach(stats => {

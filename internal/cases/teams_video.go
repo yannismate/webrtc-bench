@@ -31,6 +31,8 @@ type CaseVideoTeams struct {
 	meetingUrl           string
 	teamsCredential      *teamsCredentialData
 	statInterval         time.Duration
+	remoteSdp            string
+	isSender             bool
 }
 
 type teamsCredentialData struct {
@@ -57,6 +59,7 @@ const (
 func (c *CaseVideoTeams) Configure(config PeerCaseConfig, sendSignal func(signalType PeerSignalType, data []byte) error, statCollector stats.StatCollector) error {
 	c.browserContext, c.browserContextCancel = chromedp.NewContext(context.Background())
 	c.statCollector = statCollector
+	c.isSender = config.SendOffer
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -232,10 +235,19 @@ func (c *CaseVideoTeams) SetupTeamsReceiver() error {
 	err = chromedp.Run(timeoutContext,
 		chromedp.SendKeys("input[name=\"loginfmt\"]", c.teamsCredential.Email),
 		chromedp.SendKeys("input[name=\"loginfmt\"]", kb.Enter),
-		chromedp.Sleep(5*time.Second),
-		chromedp.WaitVisible("button[type=submit]"),
-		chromedp.Click("button[type=submit]"),
+		chromedp.Sleep(3*time.Second),
+		chromedp.WaitVisible("button[data-testid=secondaryButton]"))
+	if err != nil {
+		return err
+	}
+
+	log.Debug().Msg("Stay logged-in page found")
+	err = chromedp.Run(timeoutContext,
+		chromedp.Click("button[data-testid=secondaryButton]"),
 		chromedp.WaitVisible("#idna-me-control-avatar-trigger"))
+	if err != nil {
+		return err
+	}
 
 	log.Debug().Msg("Teams sign-in succeeded!")
 
@@ -381,6 +393,8 @@ func (c *CaseVideoTeams) browserMessage(msgText string) {
 		}
 
 		c.statCollector.RecordRow(statLine)
+	case "remote-sdp":
+		c.remoteSdp = msg.Value
 	}
 }
 
@@ -410,6 +424,15 @@ func (c *CaseVideoTeams) GetLargeResultFiles() *map[string]string {
 }
 
 func (c *CaseVideoTeams) GetExtraResultFiles() *map[string][]byte {
+	if c.remoteSdp != "" {
+		files := make(map[string][]byte)
+		if c.isSender {
+			files["teams-sdp-sender.txt"] = []byte(c.remoteSdp)
+		} else {
+			files["teams-sdp-receiver.txt"] = []byte(c.remoteSdp)
+		}
+		return &files
+	}
 	return nil
 }
 
