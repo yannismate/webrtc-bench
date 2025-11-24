@@ -4,8 +4,11 @@ import (
 	"flag"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"net"
 	"os"
 	"os/signal"
+	"runtime"
+	"strings"
 	"webrtc-bench/internal/management"
 )
 
@@ -34,6 +37,28 @@ func main() {
 	}
 
 	log.Info().Msgf("Starting Client %s", *clientName)
+
+	if runtime.GOOS == "linux" {
+		// Log current resolv.conf if on linux
+		resolvConfData, err := os.ReadFile("/etc/resolv.conf")
+		if err != nil {
+			log.Warn().Err(err).Msg("Could not read /etc/resolv.conf")
+		} else {
+			log.Info().Msgf("Current /etc/resolv.conf:")
+			for line := range strings.Lines(string(resolvConfData)) {
+				log.Info().Msgf("  %s", strings.TrimRight(line, "\r\n"))
+			}
+			log.Info().Msgf("EOF")
+		}
+
+		// Check if teams domain is resolvable
+		ips, err := net.LookupIP("teams.live.com")
+		if err != nil || len(ips) == 0 {
+			log.Warn().Err(err).Msgf("MS Teams domain is not resolvable!")
+		} else {
+			log.Info().Msgf("MS Teams domain is resolvable, first IP: %v", ips[0].String())
+		}
+	}
 
 	client := management.NewClient(*serverAddress, *clientName, *authenticationKey)
 	client.Start()

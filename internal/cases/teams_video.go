@@ -237,21 +237,8 @@ func (c *CaseVideoTeams) SetupTeamsReceiver() error {
 		chromedp.SendKeys("input[name=\"loginfmt\"]", kb.Enter),
 		chromedp.Sleep(3*time.Second),
 		chromedp.WaitVisible("button[data-testid=secondaryButton]"))
-	if err != nil {
-		return err
-	}
 
-	log.Debug().Msg("Stay logged-in page found")
-	err = chromedp.Run(timeoutContext,
-		chromedp.Click("button[data-testid=secondaryButton]"),
-		chromedp.WaitVisible("#idna-me-control-avatar-trigger"))
-	if err != nil {
-		return err
-	}
-
-	log.Debug().Msg("Teams sign-in succeeded!")
-
-	err = chromedp.Run(timeoutContext,
+	err2 := chromedp.Run(c.browserContext,
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			creds, err := webauthn.GetCredentials(authId).Do(ctx)
 			if err == nil {
@@ -276,8 +263,24 @@ func (c *CaseVideoTeams) SetupTeamsReceiver() error {
 			return err
 		}))
 	if err != nil {
+		if err2 != nil {
+			log.Error().Err(err2).Msg("failed to update teams credentials")
+		}
 		return err
 	}
+	if err2 != nil {
+		return err2
+	}
+
+	log.Debug().Msg("Stay logged-in page found")
+	err = chromedp.Run(timeoutContext,
+		chromedp.Click("button[data-testid=secondaryButton]"),
+		chromedp.WaitVisible("#idna-me-control-avatar-trigger"))
+	if err != nil {
+		return err
+	}
+
+	log.Debug().Msg("Teams sign-in succeeded!")
 
 	err = chromedp.Run(timeoutContext,
 		chromedp.Navigate(c.meetingUrl))
