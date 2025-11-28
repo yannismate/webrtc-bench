@@ -42,6 +42,8 @@ type ResultRowOutboundRTP struct {
 	PLICount        uint32
 	FramesSent      *uint64
 	TargetBitrate   *uint32
+	FrameHeight     *uint32
+	FrameWidth      *uint32
 }
 
 type GCCStats struct {

@@ -17,7 +17,7 @@ def main():
     parser.add_argument("path", help="Path to the results")
     parser.add_argument("--resample-ms", type=int, default=200, help="Interval for resampling rate graphs in ms")
     parser.add_argument("--dishy-trail", type=int, default=15, help="Trail length in seconds for Dishy position heatmap")
-    parser.add_argument("--plot-fps", type=bool, default=False, help="Add a plot for FPS if available")
+    parser.add_argument("--plot-fps", action="store_true", help="Add a plot for FPS if available")
     args = parser.parse_args()
 
     ms = Measurement(args.path)
@@ -203,7 +203,7 @@ def main():
             ax_states.legend(handles, unique_states_global, title='States', loc='upper right', fontsize='small')
 
     # Plot reconfigurations on all axes
-    role_colors = {"sender": "tab:orange", "receiver": "tab:green"}
+    role_colors = {"sender": "#f11c64", "receiver": "tab:green"}
     shown_roles = set()
     all_axes: list[Axes] = [ax1, ax_loss, ax2]
     if ax3 is not None:

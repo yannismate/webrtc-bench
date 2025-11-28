@@ -62,18 +62,17 @@ setInterval(async () => {
                 firCount: stats.firCount,
                 pliCount: stats.pliCount,
                 framesSent: stats.framesSent,
-                targetBitrate: stats.targetBitrate
+                targetBitrate: stats.targetBitrate,
+                frameHeight: stats.frameHeight,
+                frameWidth: stats.frameWidth,
             };
         } else if (stats.type === "remote-inbound-rtp" && stats.kind === "video") {
             if (!statData.outboundRtp) {
                 statData.outboundRtp = {};
             }
-            statData.outboundRtp.roundTripTime = stats.roundTripTime;
-        } else if (stats.type === "remote-outbound-rtp" && stats.kind === "video") {
-            if (!statData.inboundRtp) {
-                statData.inboundRtp = {};
+            if (stats.roundTripTime !== 0) {
+                statData.outboundRtp.roundTripTime = stats.roundTripTime;
             }
-            statData.inboundRtp.roundTripTime = stats.roundTripTime;
         }
     });
     sendManagementMessage(JSON.stringify({type: "stats", value: JSON.stringify(statData)}))

@@ -72,7 +72,6 @@ class ParquetData:
                 rtt_series.index.name = 'Timestamp'
                 rtt_series.name = "rtt_ms"
                 return rtt_series
-        print("Available columns in Parquet data:", self.data.columns.tolist())
         return None
 
     def get_jitter_ms(self) -> pd.Series | None:

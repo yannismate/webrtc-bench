@@ -71,7 +71,7 @@ async function start() {
         peerConnection.getStats().then(allStats => {
             const statData = {};
             allStats.forEach(stats => {
-                if (stats.type === "inbound-rtp") {
+                if (stats.type === "inbound-rtp" && stats.kind === "video" && stats.bytesReceived > 0) {
                     statData.timestamp = new Date(Math.round(stats.timestamp)).toISOString();
                     if (!statData.inboundRtp) {
                         statData.inboundRtp = {};
@@ -92,7 +92,7 @@ async function start() {
                     statData.inboundRtp.totalFreezesDuration = stats.totalFreezesDuration;
                     statData.inboundRtp.retransmittedBytesReceived = stats.retransmittedBytesReceived;
                     statData.inboundRtp.retransmittedPacketsReceived = stats.retransmittedPacketsReceived;
-                } else if (stats.type === "outbound-rtp") {
+                } else if (stats.type === "outbound-rtp" && stats.kind === "video" && stats.bytesSent > 0) {
                     statData.timestamp = new Date(Math.round(stats.timestamp)).toISOString();
                     statData.outboundRtp = {
                         packetsSent: stats.packetsSent,
@@ -102,18 +102,15 @@ async function start() {
                         firCount: stats.firCount,
                         pliCount: stats.pliCount,
                         framesSent: stats.framesSent,
-                        targetBitrate: stats.targetBitrate
+                        targetBitrate: stats.targetBitrate,
+                        frameHeight: stats.frameHeight,
+                        frameWidth: stats.frameWidth,
                     };
-                } else if (stats.type === "remote-inbound-rtp") {
+                } else if (stats.type === "remote-inbound-rtp" && stats.kind === "video") {
                     if (!statData.outboundRtp) {
                         statData.outboundRtp = {};
                     }
                     statData.outboundRtp.roundTripTime = stats.roundTripTime;
-                } else if (stats.type === "remote-outbound-rtp") {
-                    if (!statData.inboundRtp) {
-                        statData.inboundRtp = {};
-                    }
-                    statData.inboundRtp.roundTripTime = stats.roundTripTime;
                 }
             });
             sendManagementMessage(JSON.stringify({type: "stats", value: JSON.stringify(statData)}))

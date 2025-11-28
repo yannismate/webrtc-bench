@@ -3,6 +3,7 @@ package cases
 import (
 	"context"
 	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"github.com/chromedp/cdproto/cdp"
@@ -165,17 +166,26 @@ func (c *CaseVideoTeams) Configure(config PeerCaseConfig, sendSignal func(signal
 	}
 
 	if config.SendOffer {
-		err := c.SetupTeamsSender()
-		if err != nil {
-			log.Error().Err(err).Msg("Error setting up teams sender")
-			return err
-		}
+		err = c.SetupTeamsSender()
 	} else {
-		err := c.SetupTeamsReceiver()
-		if err != nil {
-			log.Error().Err(err).Msg("Error setting up teams receiver")
-			return err
+		err = c.SetupTeamsReceiver()
+	}
+	if err != nil {
+		log.Error().Err(err).Msg("Error setting up teams testcase, capturing screenshot and page content")
+
+		var screenshotData []byte
+		var loadedHtml string
+		err2 := chromedp.Run(c.browserContext,
+			chromedp.CaptureScreenshot(&screenshotData),
+			chromedp.OuterHTML("html", &loadedHtml))
+		if err2 != nil {
+			log.Warn().Err(err2).Msg("Error getting current page status")
 		}
+
+		log.Info().Msgf("Screenshot data: %s", base64.StdEncoding.EncodeToString(screenshotData))
+		log.Info().Msgf("Loaded HTML: %s", loadedHtml)
+
+		return err
 	}
 
 	return nil
@@ -332,9 +342,10 @@ func (c *CaseVideoTeams) SetupTeamsReceiver() error {
 func (c *CaseVideoTeams) SetupTeamsSender() error {
 	log.Debug().Msg("Setting up teams meeting sender...")
 
-	timeoutContext, cancel := context.WithTimeout(c.browserContext, time.Duration(3)*time.Minute)
+	timeoutContext, cancel := context.WithTimeout(c.browserContext, time.Duration(5)*time.Minute)
 	defer cancel()
 
+	log.Debug().Msgf("Navigating to meeting URL at %s", c.meetingUrl)
 	err := chromedp.Run(timeoutContext,
 		chromedp.Navigate(c.meetingUrl))
 	if err != nil {
