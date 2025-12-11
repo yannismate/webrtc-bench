@@ -29,5 +29,4 @@ COPY --from=build /go/bin /bin
 ADD bin/gcc_tester_${TARGETARCH} /root/bin/gcc_tester
 RUN mv /bin/irtt /root/bin/irtt
 
-
 CMD ["/bin/peer", "--server", "135.220.32.39:8080", "--name", "sender", "--v"]

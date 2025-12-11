@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/chromedp/cdproto/browser"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/page"
@@ -16,6 +17,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 	"webrtc-bench/internal/cases/stats"
 	"webrtc-bench/internal/results"
@@ -83,6 +85,16 @@ func (c *CaseVideoTeams) Configure(config PeerCaseConfig, sendSignal func(signal
 		headless = false
 	}
 
+	debugBrowserEvents := false
+	if val, ok := config.AdditionalConfig["debug_browser_events"]; ok && val == "true" {
+		debugBrowserEvents = true
+	}
+
+	userAgent := "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+	if val, ok := config.AdditionalConfig["user_agent"]; ok {
+		userAgent = val
+	}
+
 	c.statInterval = time.Duration(config.StatInterval)
 
 	if !config.SendOffer {
@@ -131,15 +143,32 @@ func (c *CaseVideoTeams) Configure(config PeerCaseConfig, sendSignal func(signal
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("headless", headless),
 		chromedp.UserDataDir(prefsTempDir),
+		chromedp.UserAgent(userAgent),
 		chromedp.Flag("disable-notifications", true),
 		chromedp.Flag("disable-gesture-requirement-for-media-playback", true),
 		chromedp.Flag("use-fake-ui-for-media-stream", true),
 		chromedp.Flag("use-fake-device-for-media-stream", true),
 		chromedp.Flag("use-file-for-fake-video-capture", videoFilePath),
 	)
+	var contextOptions []chromedp.ContextOption
+
+	if debugBrowserEvents {
+		opts = append(opts,
+			chromedp.Flag("log-level", "0"),
+			chromedp.Flag("log-net-log", true),
+			chromedp.Flag("v", "1"))
+
+		contextOptions = append(contextOptions,
+			chromedp.WithDebugf(func(s string, a ...any) {
+				format := strings.Trim(s, "\r\n\t ")
+				if len(format) > 0 {
+					log.Debug().Msgf(format, a)
+				}
+			}))
+	}
 
 	parentCtx, parentCtxCancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	browserContext, browserContextCancel := chromedp.NewContext(parentCtx)
+	browserContext, browserContextCancel := chromedp.NewContext(parentCtx, contextOptions...)
 
 	c.browserContext = browserContext
 	c.browserContextCancel = func() {
@@ -156,6 +185,9 @@ func (c *CaseVideoTeams) Configure(config PeerCaseConfig, sendSignal func(signal
 			go func() {
 				_ = chromedp.Run(c.browserContext, chromedp.Evaluate(caseTeamsVideoRTCProxyJs, nil))
 			}()
+		}
+		if debugBrowserEvents {
+			log.Debug().Msgf("Browser event received (%T): %+v", ev, ev)
 		}
 	})
 	err = chromedp.Run(c.browserContext,
@@ -452,5 +484,10 @@ func (c *CaseVideoTeams) GetExtraResultFiles() *map[string][]byte {
 
 func (c *CaseVideoTeams) Stop() {
 	c.statCollector.StopCollection()
+
+	_ = chromedp.Run(c.browserContext, chromedp.ActionFunc(func(ctx context.Context) error {
+		return browser.Close().Do(ctx)
+	}))
+
 	c.browserContextCancel()
 }
