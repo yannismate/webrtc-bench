@@ -5,6 +5,7 @@ import numpy as np
 from matplotlib.widgets import Slider
 from matplotlib.axes import Axes
 from matplotlib.lines import Line2D
+import matplotlib.dates as mdates
 
 from loaders.measurement import Measurement
 
@@ -259,6 +260,18 @@ def main():
         ax3.set_title('Jitter Over Time')
         ax3.grid(True)
         ax3.legend()
+
+    # Function to set custom grid lines
+    def set_custom_grid(ax):
+        # Define the locator for the x-axis ticks
+        locator = mdates.SecondLocator(bysecond=[12, 27, 42, 57])
+        ax.xaxis.set_major_locator(locator)
+        ax.grid(True, which='major', axis='x')
+
+    # Apply the custom grid to all relevant axes
+    set_custom_grid(ax1)
+    if loss_rate is not None:
+        set_custom_grid(ax_loss)
 
     # Dishy 2D heatmap with slider (if available)
     def create_dishy_imshow(dishy_data, title_prefix: str):

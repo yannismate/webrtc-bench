@@ -65,14 +65,29 @@ class Measurement:
         self.type = measurement_type
 
 
-    def load_files(self):
-        self.__load_dishy_files()
-        self.__load_iperf_files()
-        self.__load_irtt_files()
-        self.__load_parquet_files()
-        self.__load_probes_files()
-        self.__load_guard_trigger_files()
-        self.__load_weather_data()
+    def load_files(self, only: list[str] | None = None):
+        """Load measurement files.
+
+        Args:
+            only: Optional list of data types to load. If None, loads all.
+                  Valid values: 'dishy', 'iperf', 'irtt', 'parquet', 'probes',
+                  'guard_triggers', 'weather'
+        """
+        load_all = only is None
+        if load_all or 'dishy' in only:
+            self.__load_dishy_files()
+        if load_all or 'iperf' in only:
+            self.__load_iperf_files()
+        if load_all or 'irtt' in only:
+            self.__load_irtt_files()
+        if load_all or 'parquet' in only:
+            self.__load_parquet_files()
+        if load_all or 'probes' in only:
+            self.__load_probes_files()
+        if load_all or 'guard_triggers' in only:
+            self.__load_guard_trigger_files()
+        if load_all or 'weather' in only:
+            self.__load_weather_data()
 
     def get_send_bitrate_kbps(self, resample_ms: int = 200) -> pd.Series | None:
         if self.data_parquet_sender is not None:
@@ -171,6 +186,12 @@ class Measurement:
             min_v, max_v = self.data_iperf_receiver.get_timestamp_range()
             min_timestamp = min(min_timestamp, min_v)
             max_timestamp = max(max_timestamp, max_v)
+
+        # If no data was found, return full min/max range
+        if min_timestamp == pd.Timestamp.max.tz_localize('UTC') or max_timestamp == pd.Timestamp.min.tz_localize('UTC'):
+            min_timestamp = pd.Timestamp.min.tz_localize('UTC')
+            max_timestamp = pd.Timestamp.max.tz_localize('UTC')
+
         return min_timestamp, max_timestamp
 
     def get_reconfiguration_times(self) -> list[tuple[str, pd.Timestamp]]:
