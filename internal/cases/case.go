@@ -48,8 +48,10 @@ type PeerCaseConfig struct {
 	StatInterval          util.JSONDuration
 	AdditionalConfig      map[string]string
 	ConfigurationCommands *map[string][]string
-	ICMPPingInterval      *util.JSONDuration
-	ICMPPingTarget        *string
+	PingInterval          *util.JSONDuration
+	PingTarget            *string
+	EnableICMPPings       bool
+	EnableUDPPings        bool
 }
 
 type PeerSignalType string

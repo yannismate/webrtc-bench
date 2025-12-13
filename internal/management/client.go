@@ -274,7 +274,9 @@ func (c *client) Start() {
 							newExtraFiles := make(map[string][]byte)
 							extraFiles = &newExtraFiles
 						}
-						(*extraFiles)["icmp_"+c.ClientName+".json"] = c.pinger.GetResultData()
+						for pingerFileName, pingerResult := range c.pinger.GetResultData() {
+							(*extraFiles)[pingerFileName] = pingerResult
+						}
 						c.pinger = nil
 					}
 
@@ -548,13 +550,15 @@ func (c *client) configureCase(configMsg MessageConfigureClient) {
 		log.Fatal().Msgf("Unrecognized implementation type: %s", configMsg.CaseType)
 	}
 
-	if configMsg.Config.ICMPPingInterval != nil && configMsg.Config.ICMPPingTarget != nil {
-		pngr, err := pinger.NewPinger(*configMsg.Config.ICMPPingTarget, time.Duration(*configMsg.Config.ICMPPingInterval))
+	if configMsg.Config.PingTarget != nil && configMsg.Config.PingInterval != nil {
+		pngr, err := pinger.NewPinger(*configMsg.Config.PingTarget, configMsg.Config.EnableICMPPings,
+			configMsg.Config.EnableUDPPings, configMsg.Config.SendOffer, time.Duration(*configMsg.Config.PingInterval),
+			time.Duration(configMsg.CaseDuration))
 		if err != nil {
-			log.Fatal().Err(err).Msgf("Could not create ICMP pinger to target %s", *configMsg.Config.ICMPPingTarget)
+			log.Fatal().Err(err).Msgf("Could not create pinger to target %s", *configMsg.Config.PingTarget)
 		}
 		c.pinger = pngr
-		log.Info().Msgf("Configured ICMP pinger targetting %s", *configMsg.Config.ICMPPingTarget)
+		log.Info().Msgf("Configured pinger targetting %s with UDP=%v and ICMP=%v", *configMsg.Config.PingTarget, configMsg.Config.EnableUDPPings, configMsg.Config.EnableICMPPings)
 	}
 
 	resultWriter, err := results.NewParquetResultsWriter()

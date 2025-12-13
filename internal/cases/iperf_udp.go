@@ -22,10 +22,6 @@ type CaseIPerfUDP struct {
 	isSender     bool
 	isStopping   bool
 	outBuf       bytes.Buffer
-
-	irttProcess      *exec.Cmd
-	irttStdoutReader *bufio.Scanner
-	irttOutBuf       bytes.Buffer
 }
 
 func (c *CaseIPerfUDP) Configure(config PeerCaseConfig, _ func(signalType PeerSignalType, data []byte) error, _ stats.StatCollector) error {
@@ -101,45 +97,6 @@ func (c *CaseIPerfUDP) Configure(config PeerCaseConfig, _ func(signalType PeerSi
 			log.Warn().Msgf("[iperf3] %s", line)
 		}
 	}()
-
-	irttString, ok := config.AdditionalConfig["with_irtt"]
-	if !ok || irttString != "true" {
-		return nil
-	}
-
-	var irttArgs []string
-	if c.isSender {
-		irttArgs = append(irttArgs, "client", "-i", "100ms", "-d", strconv.Itoa(lengthSeconds)+"s", "-o", "-", targetIP)
-	} else {
-		irttArgs = append(irttArgs, "server")
-	}
-
-	c.irttProcess = exec.Command("bin/irtt", irttArgs...)
-	irttStdout, err := c.irttProcess.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	c.irttStdoutReader = bufio.NewScanner(irttStdout)
-	c.irttOutBuf = bytes.Buffer{}
-	go func() {
-		for c.irttStdoutReader.Scan() {
-			line := c.irttStdoutReader.Text()
-			log.Debug().Msgf("[irtt] %s", line)
-			_, err := c.irttOutBuf.WriteString(line + "\n")
-			if err != nil {
-				log.Error().Err(err).Str("line", line).Msg("Failed to write to irtt buffer")
-			}
-		}
-		err := c.irttProcess.Wait()
-		if err != nil && !c.isStopping {
-			log.Fatal().Err(err).Msgf("Process exited with error")
-		}
-	}()
-	if !c.isSender {
-		if err := c.irttProcess.Start(); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -148,12 +105,6 @@ func (c *CaseIPerfUDP) Start() error {
 	defer c.processMutex.Unlock()
 
 	if c.isSender {
-		if c.irttProcess != nil {
-			err := c.irttProcess.Start()
-			if err != nil {
-				return err
-			}
-		}
 		return c.process.Start()
 	}
 	return nil
@@ -185,10 +136,6 @@ func (c *CaseIPerfUDP) GetExtraResultFiles() *map[string][]byte {
 
 	val := map[string][]byte{
 		iperfFileName: c.outBuf.Bytes(),
-	}
-
-	if c.isSender && c.irttProcess != nil {
-		val["irtt-sender.json"] = c.irttOutBuf.Bytes()
 	}
 
 	return &val
