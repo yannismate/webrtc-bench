@@ -26,12 +26,15 @@ type pinger struct {
 	irttProcess *exec.Cmd
 	irttResults []byte
 	irttExited  chan struct{}
+
+	stopping bool
 }
 
 func NewPinger(targetAddress string, enableICMP bool, enableUDP bool, isSender bool, interval time.Duration, irttDuration time.Duration) (Pinger, error) {
 	p := pinger{
 		isSender:   isSender,
 		irttExited: make(chan struct{}),
+		stopping:   false,
 	}
 
 	if enableICMP && isSender {
@@ -56,11 +59,14 @@ func NewPinger(targetAddress string, enableICMP bool, enableUDP bool, isSender b
 	}
 
 	if enableUDP {
+
 		if isSender {
 			irttArgs := []string{"client", "-i", fmt.Sprintf("%dms", interval.Milliseconds()), "-d", fmt.Sprintf("%dms", irttDuration.Milliseconds()), "-o", "-", targetAddress}
 			p.irttProcess = exec.Command("bin/irtt", irttArgs...)
+			go p.startIrttStdoutReader()
 		} else {
 			p.irttProcess = exec.Command("bin/irtt", "server")
+			go p.startIrttStdoutReader()
 			log.Info().Msg("Starting IRTT server...")
 			err := p.irttProcess.Start()
 			if err != nil {
@@ -84,49 +90,19 @@ func (p *pinger) Start() {
 	}
 	if p.irttProcess != nil {
 		if p.isSender {
+			log.Info().Msgf("Starting IRTT client...")
 			err := p.irttProcess.Start()
 			if err != nil {
 				log.Fatal().Err(err).Msg("Failed to start IRTT client")
 				return
 			}
 		}
-		irttStdout, err := p.irttProcess.StdoutPipe()
-		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to get IRTT stdout pipe")
-		}
-
-		go func() {
-			stdoutReader := bufio.NewScanner(irttStdout)
-			stdoutBuf := bytes.Buffer{}
-
-			for stdoutReader.Scan() {
-				line := stdoutReader.Text()
-				if p.isSender {
-					_, err := stdoutBuf.Write([]byte(line))
-					if err != nil {
-						log.Fatal().Err(err).Msg("Failed to write IRTT stdout")
-					}
-				} else {
-					log.Debug().Msgf("[IRTT Server]: %s", line)
-				}
-			}
-
-			err := p.irttProcess.Wait()
-			if err != nil {
-				log.Fatal().Err(err).Msg("IRTT process exited with error")
-			}
-
-			if p.isSender {
-				p.irttResults = stdoutBuf.Bytes()
-			}
-
-			p.irttExited <- struct{}{}
-		}()
 	}
 
 }
 
 func (p *pinger) Stop() {
+	p.stopping = true
 	if p.icmpPinger != nil {
 		log.Info().Msgf("Stopping ICMP pinger...")
 		p.icmpPinger.Stop()
@@ -168,4 +144,37 @@ func (p *pinger) GetResultData() map[string][]byte {
 	}
 
 	return data
+}
+
+func (p *pinger) startIrttStdoutReader() {
+	irttStdout, err := p.irttProcess.StdoutPipe()
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to get IRTT stdout pipe")
+	}
+
+	stdoutReader := bufio.NewScanner(irttStdout)
+	stdoutBuf := bytes.Buffer{}
+
+	for stdoutReader.Scan() {
+		line := stdoutReader.Text()
+		if p.isSender {
+			_, err := stdoutBuf.Write([]byte(line))
+			if err != nil {
+				log.Fatal().Err(err).Msg("Failed to write IRTT stdout")
+			}
+		} else {
+			log.Debug().Msgf("[IRTT Server]: %s", line)
+		}
+	}
+
+	err = p.irttProcess.Wait()
+	if err != nil && !p.stopping {
+		log.Fatal().Err(err).Msg("IRTT process exited with error")
+	}
+
+	if p.isSender {
+		p.irttResults = stdoutBuf.Bytes()
+	}
+
+	p.irttExited <- struct{}{}
 }
