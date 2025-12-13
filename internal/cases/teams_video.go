@@ -28,14 +28,15 @@ import (
 )
 
 type CaseVideoTeams struct {
-	browserContext       context.Context
-	browserContextCancel context.CancelFunc
-	statCollector        stats.StatCollector
-	meetingUrl           string
-	teamsCredential      *teamsCredentialData
-	statInterval         time.Duration
-	remoteSdp            string
-	isSender             bool
+	browserContext           context.Context
+	browserContextCancel     context.CancelFunc
+	statCollector            stats.StatCollector
+	meetingUrl               string
+	teamsCredential          *teamsCredentialData
+	statInterval             time.Duration
+	remoteSdp                string
+	isSender                 bool
+	stopScreenshotCollection bool
 }
 
 type teamsCredentialData struct {
@@ -63,6 +64,7 @@ func (c *CaseVideoTeams) Configure(config PeerCaseConfig, sendSignal func(signal
 	c.browserContext, c.browserContextCancel = chromedp.NewContext(context.Background())
 	c.statCollector = statCollector
 	c.isSender = config.SendOffer
+	c.stopScreenshotCollection = false
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -456,6 +458,28 @@ func (c *CaseVideoTeams) Start() error {
 	if err != nil {
 		return err
 	}
+
+	go func() {
+		for {
+			if c.browserContext.Err() != nil || c.stopScreenshotCollection {
+				// Context is cancelled, exit loop
+				return
+			}
+			time.Sleep(time.Duration(10) * time.Second)
+			if c.browserContext.Err() != nil || c.stopScreenshotCollection {
+				// Context is cancelled, exit loop
+				return
+			}
+			var screenshotData []byte
+			err := chromedp.Run(c.browserContext, chromedp.CaptureScreenshot(&screenshotData))
+			if err != nil {
+				log.Warn().Err(err).Msg("Error getting page screenshot")
+			} else {
+				log.Info().Msgf("Screenshot data: %s", base64.StdEncoding.EncodeToString(screenshotData))
+			}
+		}
+	}()
+
 	return nil
 }
 
@@ -483,6 +507,7 @@ func (c *CaseVideoTeams) GetExtraResultFiles() *map[string][]byte {
 }
 
 func (c *CaseVideoTeams) Stop() {
+	c.stopScreenshotCollection = true
 	c.statCollector.StopCollection()
 
 	_ = chromedp.Run(c.browserContext, chromedp.ActionFunc(func(ctx context.Context) error {
