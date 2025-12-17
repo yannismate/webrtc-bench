@@ -1,6 +1,7 @@
 package cases
 
 import (
+	"bufio"
 	"context"
 	_ "embed"
 	"encoding/base64"
@@ -28,15 +29,18 @@ import (
 )
 
 type CaseVideoTeams struct {
-	browserContext           context.Context
-	browserContextCancel     context.CancelFunc
-	statCollector            stats.StatCollector
-	meetingUrl               string
-	teamsCredential          *teamsCredentialData
-	statInterval             time.Duration
-	remoteSdp                string
-	isSender                 bool
-	stopScreenshotCollection bool
+	browserContext       context.Context
+	browserContextCancel context.CancelFunc
+	statCollector        stats.StatCollector
+	meetingUrl           string
+	teamsCredential      *teamsCredentialData
+	statInterval         time.Duration
+	remoteSdp            string
+	isSender             bool
+	isStopping           bool
+	guardTriggers        []time.Time
+	probes               []probeAction
+	latestGCCStats       *results.GCCStats
 }
 
 type teamsCredentialData struct {
@@ -64,7 +68,7 @@ func (c *CaseVideoTeams) Configure(config PeerCaseConfig, sendSignal func(signal
 	c.browserContext, c.browserContextCancel = chromedp.NewContext(context.Background())
 	c.statCollector = statCollector
 	c.isSender = config.SendOffer
-	c.stopScreenshotCollection = false
+	c.isStopping = false
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -142,7 +146,12 @@ func (c *CaseVideoTeams) Configure(config PeerCaseConfig, sendSignal func(signal
 		return err
 	}
 
+	chromeStdOutReader, chromeStdOutWriter := io.Pipe()
+	c.handleBrowserStdout(chromeStdOutReader)
+
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath("bin/headless_shell"),
+		chromedp.CombinedOutput(chromeStdOutWriter),
 		chromedp.Flag("headless", headless),
 		chromedp.UserDataDir(prefsTempDir),
 		chromedp.UserAgent(userAgent),
@@ -440,10 +449,92 @@ func (c *CaseVideoTeams) browserMessage(msgText string) {
 			return
 		}
 
+		if c.latestGCCStats != nil {
+			statLine.GCCStats = c.latestGCCStats
+		}
 		c.statCollector.RecordRow(statLine)
 	case "remote-sdp":
 		c.remoteSdp = msg.Value
 	}
+}
+
+func (c *CaseVideoTeams) handleBrowserStdout(reader io.Reader) {
+	go func() {
+		var guardState *string
+		var msSinceLastReport *int
+
+		reader := bufio.NewReader(reader)
+		for {
+			if c.isStopping {
+				return
+			}
+			lineBytes, _, err := reader.ReadLine()
+			if err != nil {
+				log.Warn().Err(err).Msg("Error reading chrome stdout reader")
+				return
+			}
+			line := string(lineBytes)
+
+			if strings.HasPrefix(line, "SIGNAL/") {
+				if strings.HasPrefix(line, "SIGNAL/GCC/") {
+					if !c.isSender {
+						continue
+					}
+					gccStatJson := line[11:]
+					stat := gccStatsSignal{}
+					err := json.Unmarshal([]byte(gccStatJson), &stat)
+					if err != nil {
+						log.Error().Msgf("Error unmarshaling GCC stats: %s", err)
+						continue
+					}
+
+					converted := convertSignalToGCCStats(stat)
+					c.latestGCCStats = &converted
+					c.latestGCCStats.GuardState = guardState
+					c.latestGCCStats.MsSinceLastReport = msSinceLastReport
+				} else if strings.HasPrefix(line, "SIGNAL/GUARD/") {
+					statString := line[13:]
+					parts := strings.Split(statString, ";")
+					if len(parts) != 2 {
+						log.Error().Msgf("Error parsing signal guard stats: %s", statString)
+						continue
+					}
+					newMsSinceLastReport, err := strconv.Atoi(parts[0])
+					if err != nil {
+						log.Error().Msgf("Error parsing signal guard ms: %s", parts[0])
+						continue
+					}
+
+					if c.latestGCCStats != nil {
+						msSinceLastReport = &newMsSinceLastReport
+						newGuardState := parts[1]
+						if guardState != nil && *guardState != newGuardState && newGuardState == "confirmed_gap" {
+							c.guardTriggers = append(c.guardTriggers, time.Now())
+						}
+						guardState = &newGuardState
+						c.latestGCCStats.GuardState = guardState
+						c.latestGCCStats.MsSinceLastReport = msSinceLastReport
+					}
+				} else if strings.HasPrefix(line, "SIGNAL/PROBE/") {
+					probeValues := strings.Split(line[13:], "-")
+					p := probeAction{
+						Time:   time.Now(),
+						Values: []int64{},
+					}
+					for _, value := range probeValues {
+						valInt, err := strconv.ParseInt(value, 10, 64)
+						if err != nil {
+							return
+						}
+						p.Values = append(p.Values, valInt)
+					}
+					c.probes = append(c.probes, p)
+				} else {
+					log.Error().Msgf("Unknown signal: %s", line)
+				}
+			}
+		}
+	}()
 }
 
 func (c *CaseVideoTeams) Start() error {
@@ -461,12 +552,12 @@ func (c *CaseVideoTeams) Start() error {
 
 	go func() {
 		for {
-			if c.browserContext.Err() != nil || c.stopScreenshotCollection {
+			if c.browserContext.Err() != nil || c.isStopping {
 				// Context is cancelled, exit loop
 				return
 			}
 			time.Sleep(time.Duration(10) * time.Second)
-			if c.browserContext.Err() != nil || c.stopScreenshotCollection {
+			if c.browserContext.Err() != nil || c.isStopping {
 				// Context is cancelled, exit loop
 				return
 			}
@@ -507,7 +598,7 @@ func (c *CaseVideoTeams) GetExtraResultFiles() *map[string][]byte {
 }
 
 func (c *CaseVideoTeams) Stop() {
-	c.stopScreenshotCollection = true
+	c.isStopping = true
 	c.statCollector.StopCollection()
 
 	_ = chromedp.Run(c.browserContext, chromedp.ActionFunc(func(ctx context.Context) error {

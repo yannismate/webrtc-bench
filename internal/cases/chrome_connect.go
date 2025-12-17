@@ -26,7 +26,18 @@ type CaseConnectChrome struct {
 var caseConnectJs string
 
 func (c *CaseConnectChrome) Configure(config PeerCaseConfig, sendSignal func(signalType PeerSignalType, data []byte) error, statCollector stats.StatCollector) error {
-	c.browserContext, c.browserContextCancel = chromedp.NewContext(context.Background())
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath("bin/headless_shell"))
+
+	parentCtx, parentCtxCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	browserContext, browserContextCancel := chromedp.NewContext(parentCtx)
+
+	c.browserContext = browserContext
+	c.browserContextCancel = func() {
+		browserContextCancel()
+		parentCtxCancel()
+	}
+
 	c.sendSignal = sendSignal
 
 	setParamsJs := "const ICE_SERVERS = [\"" + strings.Join(config.ICEServers, "\", \"") + "\"];\n"

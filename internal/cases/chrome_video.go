@@ -67,6 +67,7 @@ func (c *CaseVideoChrome) Configure(config PeerCaseConfig, sendSignal func(signa
 	}
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath("bin/headless_shell"),
 		chromedp.Flag("allow-file-access-from-files", true),
 		chromedp.Flag("disable-gesture-requirement-for-media-playback", true),
 		chromedp.Flag("use-fake-ui-for-media-stream", true),
