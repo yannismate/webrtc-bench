@@ -224,11 +224,15 @@ func (c *client) Start() {
 					log.Error().Msg("Cannot stop execution, no case configured!")
 					continue
 				}
+				log.Info().Msg("Received stop message")
 				c.CurrentCase.Stop()
+				log.Debug().Msg("Stopped case")
 				if c.dishyAvailable {
+					log.Debug().Msg("Stopping obstruction map tracking...")
 					c.stopObstructionMapTracking()
 				}
 				if c.pinger != nil {
+					log.Debug().Msg("Stopping pinger...")
 					c.pinger.Stop()
 				}
 				c.SendMessage(MessageTypeClientStateUpdate, MessageClientStateUpdate{ClientStateTestEnding})

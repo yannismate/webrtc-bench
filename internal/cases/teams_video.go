@@ -551,6 +551,13 @@ func (c *CaseVideoTeams) Start() error {
 	}
 
 	go func() {
+		folderName := "/root/screenshots/" + strconv.FormatInt(time.Now().Unix(), 10)
+		err := os.MkdirAll(folderName, 0750)
+		if err != nil {
+			log.Error().Err(err).Msg("Error creating screenshot folder")
+			return
+		}
+
 		for {
 			if c.browserContext.Err() != nil || c.isStopping {
 				// Context is cancelled, exit loop
@@ -561,12 +568,24 @@ func (c *CaseVideoTeams) Start() error {
 				// Context is cancelled, exit loop
 				return
 			}
+			log.Debug().Msg("Creating screenshot...")
 			var screenshotData []byte
 			err := chromedp.Run(c.browserContext, chromedp.CaptureScreenshot(&screenshotData))
 			if err != nil {
 				log.Warn().Err(err).Msg("Error getting page screenshot")
 			} else {
-				log.Info().Msgf("Screenshot data: %s", base64.StdEncoding.EncodeToString(screenshotData))
+				targetFilePath := filepath.Join(folderName, strconv.FormatInt(time.Now().Unix(), 10)+".jpg")
+				createdFile, err := os.Create(targetFilePath)
+				if err != nil {
+					log.Error().Err(err).Msg("Error creating screenshot file")
+					return
+				}
+				_, err = createdFile.Write(screenshotData)
+				if err != nil {
+					log.Error().Err(err).Msg("Error writing to screenshot file")
+					return
+				}
+				log.Debug().Msg("Screenshot created")
 			}
 		}
 	}()
