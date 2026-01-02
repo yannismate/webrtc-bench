@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/go-ping/ping"
 	"github.com/rs/zerolog/log"
+	"io"
 	"os/exec"
 	"time"
 )
@@ -63,12 +64,20 @@ func NewPinger(targetAddress string, enableICMP bool, enableUDP bool, isSender b
 		if isSender {
 			irttArgs := []string{"client", "-i", fmt.Sprintf("%dms", interval.Milliseconds()), "-d", fmt.Sprintf("%dms", irttDuration.Milliseconds()), "-o", "-", targetAddress}
 			p.irttProcess = exec.Command("bin/irtt", irttArgs...)
-			go p.startIrttStdoutReader()
+			irttStdout, err := p.irttProcess.StdoutPipe()
+			if err != nil {
+				log.Fatal().Err(err).Msg("Failed to get IRTT stdout pipe")
+			}
+			go p.startIrttStdoutReader(irttStdout)
 		} else {
 			p.irttProcess = exec.Command("bin/irtt", "server")
-			go p.startIrttStdoutReader()
+			irttStdout, err := p.irttProcess.StdoutPipe()
+			if err != nil {
+				log.Fatal().Err(err).Msg("Failed to get IRTT stdout pipe")
+			}
+			go p.startIrttStdoutReader(irttStdout)
 			log.Info().Msg("Starting IRTT server...")
-			err := p.irttProcess.Start()
+			err = p.irttProcess.Start()
 			if err != nil {
 				return nil, err
 			}
@@ -146,12 +155,7 @@ func (p *pinger) GetResultData() map[string][]byte {
 	return data
 }
 
-func (p *pinger) startIrttStdoutReader() {
-	irttStdout, err := p.irttProcess.StdoutPipe()
-	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to get IRTT stdout pipe")
-	}
-
+func (p *pinger) startIrttStdoutReader(irttStdout io.Reader) {
 	stdoutReader := bufio.NewScanner(irttStdout)
 	stdoutBuf := bytes.Buffer{}
 
@@ -167,7 +171,7 @@ func (p *pinger) startIrttStdoutReader() {
 		}
 	}
 
-	err = p.irttProcess.Wait()
+	err := p.irttProcess.Wait()
 	if err != nil && !p.stopping {
 		log.Fatal().Err(err).Msg("IRTT process exited with error")
 	}

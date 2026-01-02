@@ -27,7 +27,7 @@ var caseConnectJs string
 
 func (c *CaseConnectChrome) Configure(config PeerCaseConfig, sendSignal func(signalType PeerSignalType, data []byte) error, statCollector stats.StatCollector) error {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.ExecPath("bin/headless_shell"))
+		chromedp.ExecPath("bin/headless_shell/headless_shell"))
 
 	parentCtx, parentCtxCancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	browserContext, browserContextCancel := chromedp.NewContext(parentCtx)

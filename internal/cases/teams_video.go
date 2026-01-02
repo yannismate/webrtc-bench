@@ -65,7 +65,6 @@ const (
 )
 
 func (c *CaseVideoTeams) Configure(config PeerCaseConfig, sendSignal func(signalType PeerSignalType, data []byte) error, statCollector stats.StatCollector) error {
-	c.browserContext, c.browserContextCancel = chromedp.NewContext(context.Background())
 	c.statCollector = statCollector
 	c.isSender = config.SendOffer
 	c.isStopping = false
@@ -89,6 +88,11 @@ func (c *CaseVideoTeams) Configure(config PeerCaseConfig, sendSignal func(signal
 	headless := true
 	if val, ok := config.AdditionalConfig["headless"]; ok && val == "false" {
 		headless = false
+	}
+
+	headlessShellPath := "chromium-headless-shell"
+	if val, ok := config.AdditionalConfig["use_custom_chromium"]; ok && val == "true" {
+		headlessShellPath = "bin/headless_shell/headless_shell"
 	}
 
 	debugBrowserEvents := false
@@ -150,7 +154,7 @@ func (c *CaseVideoTeams) Configure(config PeerCaseConfig, sendSignal func(signal
 	c.handleBrowserStdout(chromeStdOutReader)
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.ExecPath("bin/headless_shell"),
+		chromedp.ExecPath(headlessShellPath),
 		chromedp.CombinedOutput(chromeStdOutWriter),
 		chromedp.Flag("headless", headless),
 		chromedp.UserDataDir(prefsTempDir),
@@ -180,6 +184,15 @@ func (c *CaseVideoTeams) Configure(config PeerCaseConfig, sendSignal func(signal
 
 	parentCtx, parentCtxCancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	browserContext, browserContextCancel := chromedp.NewContext(parentCtx, contextOptions...)
+
+	defer func() {
+		if parentCtx.Err() != nil {
+			log.Warn().Err(parentCtx.Err()).Msg("Parent browser context stopped with error")
+		}
+		if browserContext.Err() != nil {
+			log.Warn().Err(browserContext.Err()).Msg("Browser context stopped with error")
+		}
+	}()
 
 	c.browserContext = browserContext
 	c.browserContextCancel = func() {
@@ -532,6 +545,8 @@ func (c *CaseVideoTeams) handleBrowserStdout(reader io.Reader) {
 				} else {
 					log.Error().Msgf("Unknown signal: %s", line)
 				}
+			} else {
+				log.Debug().Msgf("[Chromium] %s", line)
 			}
 		}
 	}()
