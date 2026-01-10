@@ -20,9 +20,10 @@ type TestMetadata struct {
 	ImplementationVersion string    `json:"implementation_version"`
 	TimeStarted           time.Time `json:"time_started"`
 	Host                  string    `json:"host"`
+	PeerPublicIP          string    `json:"peer_public_ip"`
 }
 
-func GetPionTestMetadata() TestMetadata {
+func GetPionTestMetadata(publicIP string) TestMetadata {
 	buildInfo, ok := debug.ReadBuildInfo()
 	if !ok {
 		return TestMetadata{}
@@ -43,13 +44,21 @@ func GetPionTestMetadata() TestMetadata {
 		ImplementationVersion: pionVersion,
 		TimeStarted:           time.Now(),
 		Host:                  hostName,
+		PeerPublicIP:          publicIP,
 	}
 }
 
-func GetChromeTestMetadata() TestMetadata {
+func GetChromeTestMetadata(publicIP string, isCustomVersion bool) TestMetadata {
 	hostName, _ := os.Hostname()
 
-	ctx, cancel := chromedp.NewContext(context.Background())
+	opts := append(chromedp.DefaultExecAllocatorOptions[:])
+	if isCustomVersion {
+		opts = append(opts, chromedp.ExecPath("bin/headless_shell/headless_shell"))
+	}
+	parentCtx, parentCtxCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer parentCtxCancel()
+
+	ctx, cancel := chromedp.NewContext(parentCtx)
 	defer cancel()
 
 	err := chromedp.Run(ctx, chromedp.Navigate("about:blank"))
@@ -68,10 +77,11 @@ func GetChromeTestMetadata() TestMetadata {
 		ImplementationVersion: product,
 		TimeStarted:           time.Now(),
 		Host:                  hostName,
+		PeerPublicIP:          publicIP,
 	}
 }
 
-func GetLibWebRTCTestMetadata() TestMetadata {
+func GetLibWebRTCTestMetadata(publicIP string) TestMetadata {
 	hostName, _ := os.Hostname()
 
 	return TestMetadata{
@@ -79,5 +89,6 @@ func GetLibWebRTCTestMetadata() TestMetadata {
 		ImplementationVersion: "TODO",
 		TimeStarted:           time.Now(),
 		Host:                  hostName,
+		PeerPublicIP:          publicIP,
 	}
 }

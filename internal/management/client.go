@@ -10,6 +10,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"io"
+	"io/ioutil"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -36,6 +38,8 @@ type client struct {
 	ClientName        string
 	AuthenticationKey string
 	SendChan          chan []byte
+
+	PeerPublicIP string
 
 	CurrentCase         cases.PeerCaseExecutor
 	CurrentCaseConfig   cases.PeerCaseConfig
@@ -84,6 +88,8 @@ func NewClient(serverAddress string, clientName string, authenticationKey string
 
 func (c *client) Start() {
 	c.dishySetup()
+
+	c.fetchOwnPublicIP()
 
 	headers := http.Header{}
 	headers.Set(AuthenticationKeyHeader, c.AuthenticationKey)
@@ -439,6 +445,37 @@ func (c *client) startObstructionMapTracking() {
 	}()
 }
 
+func (c *client) fetchOwnPublicIP() {
+	req, err := http.NewRequest("GET", "https://icanhazip.com/", nil)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Error creating request")
+		return
+	}
+
+	dialer := net.Dialer{}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return dialer.DialContext(ctx, "tcp4", addr)
+	}
+	client := &http.Client{Transport: transport}
+	res, err := client.Do(req)
+	if err != nil {
+		log.Error().Err(err).Msg("Error fetching own public IP")
+		return
+	}
+
+	defer res.Body.Close()
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		log.Error().Err(err).Msg("Error reading own public IP")
+		return
+	}
+
+	publicIP := strings.TrimSpace(string(body))
+	log.Info().Msgf("Peers Public IP: %v", publicIP)
+	c.PeerPublicIP = publicIP
+}
+
 func (c *client) stopObstructionMapTracking() {
 	log.Debug().Msg("Stopping dishy obstruction map tracking...")
 	close(c.dishyStopDataCollectionChan)
@@ -513,7 +550,7 @@ func (c *client) SendMessage(msgType MessageType, content interface{}) {
 func (c *client) configureCase(configMsg MessageConfigureClient) {
 	c.CurrentCaseConfig = configMsg.Config
 	if configMsg.Config.Implementation == cases.PeerImplementationPion {
-		c.CurrentCaseMetadata = util.GetPionTestMetadata()
+		c.CurrentCaseMetadata = util.GetPionTestMetadata(c.PeerPublicIP)
 		switch configMsg.CaseType {
 		case cases.CaseTypeConnect:
 			c.CurrentCase = &cases.CaseConnectPion{}
@@ -523,7 +560,11 @@ func (c *client) configureCase(configMsg MessageConfigureClient) {
 			log.Fatal().Msgf("Unrecognized caseType: %s", configMsg.CaseType)
 		}
 	} else if configMsg.Config.Implementation == cases.PeerImplementationChrome {
-		c.CurrentCaseMetadata = util.GetChromeTestMetadata()
+		isCustomVersion := false
+		if val, ok := configMsg.Config.AdditionalConfig["use_custom_chromium"]; ok && val == "true" {
+			isCustomVersion = true
+		}
+		c.CurrentCaseMetadata = util.GetChromeTestMetadata(c.PeerPublicIP, isCustomVersion)
 		switch configMsg.CaseType {
 		case cases.CaseTypeConnect:
 			c.CurrentCase = &cases.CaseConnectChrome{}
@@ -533,7 +574,7 @@ func (c *client) configureCase(configMsg MessageConfigureClient) {
 			log.Fatal().Msgf("Unrecognized caseType: %s", configMsg.CaseType)
 		}
 	} else if configMsg.Config.Implementation == cases.PeerImplementationLibWebRTC {
-		c.CurrentCaseMetadata = util.GetLibWebRTCTestMetadata()
+		c.CurrentCaseMetadata = util.GetLibWebRTCTestMetadata(c.PeerPublicIP)
 		switch configMsg.CaseType {
 		case cases.CaseTypeVideo:
 			c.CurrentCase = &cases.CaseVideoLibWebRTC{}

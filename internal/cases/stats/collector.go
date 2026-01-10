@@ -200,4 +200,5 @@ func (sc *statCollector) StopCollection() {
 		}
 		sc.resultWriter.Close()
 	})
+	log.Debug().Msg("Parquet data collection stopped")
 }
