@@ -316,6 +316,10 @@ class Measurement:
             self.data_parquet_receiver = parquet_from_file(receiver_path)
 
     def __load_icmp_ping_files(self):
+        sender_path = os.path.join(self.folder_path, "icmp-sender.json")
+        if os.path.exists(sender_path):
+            self.data_icmp_sender = icmp_ping_from_json(sender_path)
+            return
         sender_path = os.path.join(self.folder_path, "icmp_sender.json")
         if os.path.exists(sender_path):
             self.data_icmp_sender = icmp_ping_from_json(sender_path)
