@@ -92,3 +92,15 @@ func GetLibWebRTCTestMetadata(publicIP string) TestMetadata {
 		PeerPublicIP:          publicIP,
 	}
 }
+
+func GetIPerfTestMetadata(publicIP string) TestMetadata {
+	hostName, _ := os.Hostname()
+
+	return TestMetadata{
+		ImplementationType:    "iperf3",
+		ImplementationVersion: "",
+		TimeStarted:           time.Now(),
+		Host:                  hostName,
+		PeerPublicIP:          publicIP,
+	}
+}

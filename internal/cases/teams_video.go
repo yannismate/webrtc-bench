@@ -74,6 +74,16 @@ func (c *CaseVideoTeams) Configure(config PeerCaseConfig, sendSignal func(signal
 		return err
 	}
 
+	if delayConfigSeconds, ok := config.AdditionalConfig["delay_config_seconds"]; ok {
+		seconds, err := strconv.ParseInt(delayConfigSeconds, 10, 64)
+		if err != nil {
+			log.Error().Err(err).Msg("Error parsing delay_config_seconds")
+		} else {
+			log.Info().Msgf("Delaying configuration by %d seconds", seconds)
+			time.Sleep(time.Duration(seconds) * time.Second)
+		}
+	}
+
 	videoFilePath, ok := config.AdditionalConfig["video_file"]
 	if !ok {
 		videoFilePath = path.Join(cwd, "testdata", "test.mjpeg")

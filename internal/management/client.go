@@ -582,11 +582,17 @@ func (c *client) configureCase(configMsg MessageConfigureClient) {
 			log.Fatal().Msgf("Unrecognized caseType: %s", configMsg.CaseType)
 		}
 	} else if configMsg.Config.Implementation == cases.PeerImplementationIPerf {
+		c.CurrentCaseMetadata = util.GetIPerfTestMetadata(c.PeerPublicIP)
 		if configMsg.CaseType != cases.CaseTypeBandwidthMeasurement {
 			log.Fatal().Msgf("Unrecognized caseType: %s", configMsg.CaseType)
 		}
 		c.CurrentCase = &cases.CaseIPerfUDP{Duration: time.Duration(configMsg.CaseDuration)}
 	} else if configMsg.Config.Implementation == cases.PeerImplementationTeams {
+		isCustomVersion := false
+		if val, ok := configMsg.Config.AdditionalConfig["use_custom_chromium"]; ok && val == "true" {
+			isCustomVersion = true
+		}
+		c.CurrentCaseMetadata = util.GetChromeTestMetadata(c.PeerPublicIP, isCustomVersion)
 		if configMsg.CaseType != cases.CaseTypeVideo {
 			log.Fatal().Msgf("Unrecognized caseType: %s", configMsg.CaseType)
 		}
