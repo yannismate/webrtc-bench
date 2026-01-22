@@ -18,8 +18,49 @@ def main():
     parser.add_argument("path", help="Path to the results")
     parser.add_argument("--resample-ms", type=int, default=200, help="Interval for resampling rate graphs in ms")
     parser.add_argument("--dishy-trail", type=int, default=15, help="Trail length in seconds for Dishy position heatmap")
-    parser.add_argument("--plot-fps", action="store_true", help="Add a plot for FPS if available")
+    parser.add_argument(
+        "--graphs",
+        type=str,
+        help=(
+            "Comma-separated list of graphs to plot. Options: bitrate, loss, rtt, irtt, jitter, "
+            "congestion, delay, feedback, fps, states, icmp. Default shows all available."
+        ),
+    )
     args = parser.parse_args()
+
+    graph_names = {
+        "bitrate",
+        "loss",
+        "rtt",       # WebRTC/parquet RTT
+        "irtt",      # IRTT RTT
+        "jitter",
+        "congestion",
+        "delay",
+        "feedback",
+        "fps",
+        "states",
+        "icmp",
+    }
+    alias_map = {
+        "rtt_parquet": ["rtt"],
+        "rtt_irtt": ["irtt"],
+        "rttall": ["rtt", "irtt"],
+    }
+    selected_graphs: set[str] | None = None
+    if args.graphs:
+        parsed = [g.strip().lower() for g in args.graphs.split(",") if g.strip()]
+        if not parsed:
+            parser.error("--graphs provided but no graph names found")
+        if "all" in parsed:
+            selected_graphs = None
+        else:
+            expanded: list[str] = []
+            for g in parsed:
+                expanded.extend(alias_map.get(g, [g]))
+            invalid = [g for g in expanded if g not in graph_names]
+            if invalid:
+                parser.error(f"Invalid graph names: {', '.join(invalid)}")
+            selected_graphs = set(expanded)
 
     ms = Measurement(args.path)
     ms.load_files()
@@ -27,7 +68,8 @@ def main():
     send_br = ms.get_send_bitrate_kbps(args.resample_ms)
     recv_br = ms.get_recv_bitrate_kbps(args.resample_ms)
     loss_rate = ms.get_loss_rate()
-    rtt = ms.get_rtt_ms()
+    rtt_webrtc = ms.get_parquet_rtt_ms()
+    rtt_irtt = ms.get_irtt_rtt_ms()
     jitter = ms.get_jitter_ms()
     reconfig_times = ms.get_reconfiguration_times()
     cong_br = ms.get_congestion_bitrates()
@@ -35,85 +77,144 @@ def main():
     feedback_interval = ms.get_feedback_interval_ms()
     cong_states = ms.get_congestion_states()
     icmp_pings = ms.get_icmp_pings()
-    send_fps = ms.get_send_fps() if args.plot_fps else None
-    recv_fps = ms.get_recv_fps() if args.plot_fps else None
-    freeze_times = ms.get_freeze_times() if args.plot_fps else None
+    # FPS is now always loaded if available
+    send_fps = ms.get_send_fps()
+    recv_fps = ms.get_recv_fps()
+    freeze_times = ms.get_freeze_times()
     probe_timestamps = ms.get_probe_timestamps()
     guard_trigger_timestamps = ms.get_guard_trigger_timestamps()
-    num_plots = 3 \
-        + (1 if jitter is not None else 0) \
-        + (1 if cong_br is not None else 0) \
-        + (1 if delay_estimate is not None else 0) \
-        + (1 if feedback_interval is not None else 0) \
-        + (1 if (cong_states is not None and not cong_states.empty) else 0) \
-        + (1 if icmp_pings is not None else 0) \
-        + (1 if (args.plot_fps and (send_fps is not None or recv_fps is not None)) else 0)
-    heights = {2: 8, 3: 10, 4: 12, 5: 14, 6: 16, 7: 18, 8: 20, 9: 22}
-    fig, axes = plt.subplots(num_plots, 1, sharex=True, figsize=(10, heights.get(num_plots, 12)))
-    axes_list: list[Axes] = np.atleast_1d(axes).ravel().tolist()  # type: ignore[assignment]
-    ax1: Axes = axes_list[0]  # Bitrate
-    ax_loss: Axes = axes_list[1]  # Loss
-    ax2: Axes = axes_list[2]  # RTT
-    idx = 3
-    ax3: Axes | None = None
+
+    availability = {
+        "bitrate": (send_br is not None and not send_br.empty) or (recv_br is not None and not recv_br.empty),
+        "loss": loss_rate is not None and not loss_rate.empty,
+        "rtt": rtt_webrtc is not None,
+        "irtt": rtt_irtt is not None,
+        "jitter": jitter is not None,
+        "congestion": cong_br is not None and not cong_br.empty,
+        "delay": delay_estimate is not None,
+        "feedback": feedback_interval is not None,
+        "fps": (send_fps is not None or recv_fps is not None),
+        "states": cong_states is not None and not cong_states.empty,
+        "icmp": icmp_pings is not None,
+    }
+
+    def should_show(name: str) -> bool:
+        return availability[name] and (selected_graphs is None or name in selected_graphs)
+
+    show_bitrate = should_show("bitrate")
+    show_loss = should_show("loss")
+    show_rtt_webrtc = should_show("rtt")
+    show_rtt_irtt = should_show("irtt")
+    show_jitter = should_show("jitter")
+    show_cong = should_show("congestion")
+    show_delay = should_show("delay")
+    show_feedback = should_show("feedback")
+    show_fps = should_show("fps")
+    show_states = should_show("states")
+    show_icmp = should_show("icmp")
+
+    # Order plots with IRTT near ICMP at the bottom
+    plot_flags_ordered = [
+        ("bitrate", show_bitrate),
+        ("loss", show_loss),
+        ("rtt_webrtc", show_rtt_webrtc),
+        ("jitter", show_jitter),
+        ("congestion", show_cong),
+        ("delay", show_delay),
+        ("feedback", show_feedback),
+        ("fps", show_fps),
+        ("states", show_states),
+        ("icmp", show_icmp),
+        ("irtt", show_rtt_irtt),
+    ]
+    num_plots = sum(flag for _, flag in plot_flags_ordered)
+    heights = {2: 8, 3: 10, 4: 12, 5: 14, 6: 16, 7: 18, 8: 20, 9: 22, 10: 24, 11: 26}
+    fig = None
+    axes_list: list[Axes] = []
+    if num_plots > 0:
+        fig, axes = plt.subplots(num_plots, 1, sharex=True, figsize=(10, heights.get(num_plots, 12)))
+        axes_list = np.atleast_1d(axes).ravel().tolist()  # type: ignore[assignment]
+
+    ax1: Axes | None = None
+    ax_loss: Axes | None = None
+    ax_rtt_webrtc: Axes | None = None
+    ax_rtt_irtt: Axes | None = None
+    ax_jitter: Axes | None = None
     ax_cong: Axes | None = None
     ax_delay: Axes | None = None
     ax_feedback_interval: Axes | None = None
     ax_states: Axes | None = None
     ax_fps: Axes | None = None
     ax_icmp_pings: Axes | None = None
-    if jitter is not None and idx < len(axes_list):
-        ax3 = axes_list[idx]
-        idx += 1
-    if cong_br is not None and idx < len(axes_list):
-        ax_cong = axes_list[idx]
-        idx += 1
-    if delay_estimate is not None and idx < len(axes_list):
-        ax_delay = axes_list[idx]
-        idx += 1
-    if feedback_interval is not None and idx < len(axes_list):
-        ax_feedback_interval = axes_list[idx]
-        idx += 1
-    if (args.plot_fps and (send_fps is not None or recv_fps is not None)) and idx < len(axes_list):
-        ax_fps = axes_list[idx]
-        idx += 1
-    if (cong_states is not None and not cong_states.empty) and idx < len(axes_list):
-        ax_states = axes_list[idx]
-        idx += 1
-    if icmp_pings is not None and idx < len(axes_list):
-        ax_icmp_pings = axes_list[idx]
 
-    # Plot bitrates
-    ax1.plot(send_br.index, send_br.values, label='Send Bitrate (kbps)')
-    ax1.plot(recv_br.index, recv_br.values, label='Recv Bitrate (kbps)')
-    ax1.set_ylabel('Bitrate (kbps)')
-    ax1.set_title('Bitrate Over Time')
-    ax1.grid(True)
-    ax1.legend()
+    idx = 0
+    for name, flag in plot_flags_ordered:
+        if not flag:
+            continue
+        ax = axes_list[idx]
+        idx += 1
+        if name == "bitrate":
+            ax1 = ax
+        elif name == "loss":
+            ax_loss = ax
+        elif name == "rtt_webrtc":
+            ax_rtt_webrtc = ax
+        elif name == "jitter":
+            ax_jitter = ax
+        elif name == "congestion":
+            ax_cong = ax
+        elif name == "delay":
+            ax_delay = ax
+        elif name == "feedback":
+            ax_feedback_interval = ax
+        elif name == "fps":
+            ax_fps = ax
+        elif name == "states":
+            ax_states = ax
+        elif name == "icmp":
+            ax_icmp_pings = ax
+        elif name == "irtt":
+            ax_rtt_irtt = ax
 
-    # Plot Loss Rate (always second)
-    if loss_rate is not None:
-        ax_loss.plot(loss_rate.index, loss_rate.values * 100, label='Loss Rate (%)', color='tab:gray')
-        ax_loss.set_ylabel('Loss Rate (%)')
-        ax_loss.set_title('Loss Rate Over Time')
+    # Plot RTT (WebRTC/parquet if available)
+    if ax_rtt_webrtc is not None and rtt_webrtc is not None:
+        ax_rtt_webrtc.plot(rtt_webrtc.index, rtt_webrtc.values, label='RTT (WebRTC, ms)', color='tab:red')
+        ax_rtt_webrtc.set_xlabel('Time')
+        ax_rtt_webrtc.set_ylabel('RTT (ms)')
+        ax_rtt_webrtc.set_title('RTT (WebRTC) Over Time')
+        ax_rtt_webrtc.grid(True)
+        ax_rtt_webrtc.legend()
+
+    # Plot RTT (IRTT)
+    if ax_rtt_irtt is not None and rtt_irtt is not None:
+        ax_rtt_irtt.plot(rtt_irtt.index, rtt_irtt.values, label='RTT (IRTT, ms)', color='tab:orange')
+        ax_rtt_irtt.set_xlabel('Time')
+        ax_rtt_irtt.set_ylabel('RTT (ms)')
+        ax_rtt_irtt.set_title('RTT (IRTT) Over Time')
+        ax_rtt_irtt.grid(True)
+        ax_rtt_irtt.legend()
+
+    # Plot loss rate
+    if ax_loss is not None and loss_rate is not None and not loss_rate.empty:
+        loss_series = loss_rate
+        ylabel = "Loss rate"
+        cleaned = loss_series.dropna()
+        if not cleaned.empty and cleaned.le(1.0).all():
+            loss_series = loss_series * 100.0
+            ylabel = "Loss (%)"
+        ax_loss.plot(loss_series.index, loss_series.values, label='Loss', color='tab:blue')
+        ax_loss.set_xlabel('Time')
+        ax_loss.set_ylabel(ylabel)
+        ax_loss.set_title('Loss Over Time')
         ax_loss.grid(True)
         ax_loss.legend()
 
-    # Plot RTT (if available)
-    if rtt is not None:
-        ax2.plot(rtt.index, rtt.values, label='RTT (ms)', color='tab:red')
-        ax2.set_xlabel('Time')
-        ax2.set_ylabel('RTT (ms)')
-        ax2.set_title('RTT Over Time')
-        ax2.grid(True)
-        ax2.legend()
-
     # Plot Jitter (if available)
-    if jitter is not None and ax3 is not None:
-        ax3.plot(jitter.index, jitter.values, label='Jitter (ms)', color='tab:purple')
+    if ax_jitter is not None and jitter is not None:
+        ax_jitter.plot(jitter.index, jitter.values, label='Jitter (ms)', color='tab:purple')
 
     # Plot congestion bitrates (if available)
-    if cong_br is not None and ax_cong is not None and not cong_br.empty:
+    if ax_cong is not None and cong_br is not None and not cong_br.empty:
         palette = sns.color_palette(n_colors=len(cong_br.columns))
         for i, col in enumerate(cong_br.columns):
             ax_cong.plot(cong_br.index, cong_br[col].values, label=col, color=palette[i % len(palette)])
@@ -124,7 +225,7 @@ def main():
         ax_cong.legend()
 
     # Plot delay estimate (if available)
-    if delay_estimate is not None and ax_delay is not None:
+    if ax_delay is not None and delay_estimate is not None:
         ax_delay.plot(delay_estimate.index, delay_estimate.values, label='Delay Estimate (ms)', color='tab:blue')
         ax_delay.set_xlabel('Time')
         ax_delay.set_ylabel('Delay Estimate (ms)')
@@ -132,7 +233,8 @@ def main():
         ax_delay.grid(True)
         ax_delay.legend()
 
-    if feedback_interval is not None and ax_feedback_interval is not None:
+    # Plot feedback interval
+    if ax_feedback_interval is not None and feedback_interval is not None:
         ax_feedback_interval.plot(feedback_interval.index, feedback_interval.values, label='Feedback interval (ms)', color='tab:blue')
         ax_feedback_interval.set_xlabel('Time')
         ax_feedback_interval.set_ylabel('Feedback interval (ms)')
@@ -140,7 +242,7 @@ def main():
         ax_feedback_interval.grid(True)
         ax_feedback_interval.legend()
 
-    if (args.plot_fps and ax_fps is not None) and (send_fps is not None or recv_fps is not None):
+    if ax_fps is not None and (send_fps is not None or recv_fps is not None):
         if send_fps is not None:
             ax_fps.plot(send_fps.index, send_fps.values, label='Send FPS')
         if recv_fps is not None:
@@ -150,16 +252,14 @@ def main():
         ax_fps.set_title('FPS Over Time')
         ax_fps.grid(True)
         ax_fps.legend()
-        # Add vertical lines for freeze events
         if freeze_times is not None and not freeze_times.empty:
             for i, ts in enumerate(freeze_times.index):
                 label = "Freeze" if i == 0 else None
                 ax_fps.axvline(ts, color='red', linestyle='--', linewidth=1.0, alpha=0.7, label=label)
-            # Update legend if freeze lines were added
             ax_fps.legend()
 
     # Plot congestion states (if available) as colored timelines per column
-    if cong_states is not None and ax_states is not None and not cong_states.empty:
+    if ax_states is not None and cong_states is not None and not cong_states.empty:
         cols = list(cong_states.columns)
         y_positions = np.arange(len(cols))
         # Determine global time range across measurement to close last segment
@@ -206,23 +306,14 @@ def main():
     # Plot reconfigurations on all axes
     role_colors = {"sender": "#f11c64", "receiver": "tab:green"}
     shown_roles = set()
-    all_axes: list[Axes] = [ax1, ax_loss, ax2]
-    if ax3 is not None:
-        all_axes.append(ax3)
-    if ax_cong is not None:
-        all_axes.append(ax_cong)
-    if ax_delay is not None:
-        all_axes.append(ax_delay)
-    if ax_feedback_interval is not None:
-        all_axes.append(ax_feedback_interval)
-    if ax_fps is not None:
-        all_axes.append(ax_fps)
-    if ax_states is not None:
-        all_axes.append(ax_states)
+    all_axes: list[Axes] = []
+    for ax in [ax1, ax_loss, ax_rtt_webrtc, ax_jitter, ax_cong, ax_delay, ax_feedback_interval, ax_fps, ax_states, ax_icmp_pings, ax_rtt_irtt]:
+        if ax is not None:
+            all_axes.append(ax)
     for role, ts in reconfig_times:
-        label = f"Reconfig ({role})" if role not in shown_roles else None
+        label = f"Handover ({role})" if role not in shown_roles else None
         for i, ax in enumerate(all_axes):
-            ax.axvline(ts, color=role_colors.get(role, "k"), linestyle="-", linewidth=2.0, label=label if i == 0 else None)
+            ax.axvline(ts, color=role_colors.get(role, "k"), linestyle="-", linewidth=2.0, alpha=0.3, label=label if i == 0 else None)
         shown_roles.add(role)
 
     if probe_timestamps is not None:
@@ -235,45 +326,66 @@ def main():
             label = "Guard Trigger" if i == 0 else None
             ax.axvline(ts, color="green", linestyle=(0, (1, 1)), linewidth=1.0, label=label)
 
-    if icmp_pings is not None:
+    # Plot ICMP RTT
+    if ax_icmp_pings is not None and icmp_pings is not None:
         ax_icmp_pings.plot(icmp_pings.index, icmp_pings.values, label='ICMP RTT', color='tab:gray')
         ax_icmp_pings.set_ylabel('RTT (ms)')
         ax_icmp_pings.set_title('ICMP RTT')
         ax_icmp_pings.grid(True)
         ax_icmp_pings.legend()
 
-    ax1.set_ylabel('Bitrate (kbps)')
-    ax1.set_title('Bitrate Over Time')
-    ax1.grid(True)
-    ax1.legend()
+    # Plot Bitrate
+    if ax1 is not None:
+        if send_br is not None and not send_br.empty:
+            ax1.plot(send_br.index, send_br.values, label='Send Bitrate (kbps)')
+        if recv_br is not None and not recv_br.empty:
+            ax1.plot(recv_br.index, recv_br.values, label='Recv Bitrate (kbps)')
+        ax1.set_ylabel('Bitrate (kbps)')
+        ax1.set_title('Bitrate Over Time')
+        ax1.grid(True)
+        if ax1.lines:
+            ax1.legend()
 
-    ax2.set_xlabel('Time')
-    ax2.set_ylabel('RTT (ms)')
-    ax2.set_title('RTT Over Time')
-    ax2.grid(True)
-    if rtt is not None:
-        ax2.legend()
+    if ax_rtt_webrtc is not None:
+        ax_rtt_webrtc.set_xlabel('Time')
+        ax_rtt_webrtc.set_ylabel('RTT (ms)')
+        ax_rtt_webrtc.set_title('RTT (WebRTC) Over Time')
+        ax_rtt_webrtc.grid(True)
 
-    if jitter is not None and ax3 is not None:
-        ax3.set_xlabel('Time')
-        ax3.set_ylabel('Jitter (ms)')
-        ax3.set_title('Jitter Over Time')
-        ax3.grid(True)
-        ax3.legend()
+    if ax_rtt_irtt is not None:
+        ax_rtt_irtt.set_xlabel('Time')
+        ax_rtt_irtt.set_ylabel('RTT (ms)')
+        ax_rtt_irtt.set_title('RTT (IRTT) Over Time')
+        ax_rtt_irtt.grid(True)
 
-    # Function to set custom grid lines
+    if ax_jitter is not None and jitter is not None:
+        ax_jitter.set_xlabel('Time')
+        ax_jitter.set_ylabel('Jitter (ms)')
+        ax_jitter.set_title('Jitter Over Time')
+        ax_jitter.grid(True)
+        ax_jitter.legend()
+
     def set_custom_grid(ax):
-        # Define the locator for the x-axis ticks
         locator = mdates.SecondLocator(bysecond=[12, 27, 42, 57])
         ax.xaxis.set_major_locator(locator)
         ax.grid(True, which='major', axis='x')
 
-    # Apply the custom grid to all relevant axes
-    set_custom_grid(ax1)
-    if loss_rate is not None:
-        set_custom_grid(ax_loss)
+    for ax in [
+        ax1,
+        ax_loss,
+        ax_rtt_webrtc,
+        ax_rtt_irtt,
+        ax_jitter,
+        ax_cong,
+        ax_delay,
+        ax_feedback_interval,
+        ax_fps,
+        ax_states,
+        ax_icmp_pings,
+    ]:
+        if ax is not None:
+            set_custom_grid(ax)
 
-    # Dishy 2D heatmap with slider (if available)
     def create_dishy_imshow(dishy_data, title_prefix: str):
         if dishy_data is None:
             return
@@ -355,8 +467,10 @@ def main():
     if getattr(ms, 'data_dishy_receiver', None) is not None:
         create_dishy_imshow(ms.data_dishy_receiver, title_prefix='Receiver')
 
-    fig.tight_layout()
-    plt.show()
+    if fig is not None:
+        fig.tight_layout()
+    if num_plots > 0 or _WIDGETS_KEEPALIVE:
+        plt.show()
 
 if __name__ == "__main__":
     main()

@@ -103,21 +103,28 @@ class Measurement:
             return self.data_iperf_receiver.get_recv_bitrate_kbps()
         return None
 
-    def get_rtt_ms(self) -> pd.Series | None:
+    def get_parquet_rtt_ms(self) -> pd.Series | None:
         if self.data_parquet_sender is not None:
             rtt = self.data_parquet_sender.get_rtt_ms()
             if rtt is not None:
                 return rtt
-
         if self.data_parquet_receiver is not None:
             rtt = self.data_parquet_receiver.get_rtt_ms()
             if rtt is not None:
                 return rtt
-
-        if self.data_irtt is not None:
-           return self.data_irtt.get_rtt_ms()
-
         return None
+
+    def get_irtt_rtt_ms(self) -> pd.Series | None:
+        if self.data_irtt is not None:
+            return self.data_irtt.get_rtt_ms()
+        return None
+
+    def get_rtt_ms(self) -> pd.Series | None:
+        # Prefer explicit parquet RTT first, then fall back to IRTT for backwards compatibility
+        parquet_rtt = self.get_parquet_rtt_ms()
+        if parquet_rtt is not None:
+            return parquet_rtt
+        return self.get_irtt_rtt_ms()
 
     def get_jitter_ms(self) -> pd.Series | None:
         if self.data_parquet_receiver is not None:

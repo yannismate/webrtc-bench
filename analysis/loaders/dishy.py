@@ -32,7 +32,7 @@ class DishyData:
 
         for obstruction_entry in data["ObstructionData"]:
             ts = pd.to_datetime(obstruction_entry["Time"], utc=True)
-            for snr in obstruction_entry["SNR"]:
+            for snr in (obstruction_entry["SNR"] or []):
                 snr_idx = snr["Index"]
                 if snr_idx in known_snr:
                     continue
