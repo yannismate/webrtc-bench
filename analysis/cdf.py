@@ -5,6 +5,7 @@ from typing import List, Tuple, Optional, Dict
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import pandas as pd
 
 from loaders.measurement import Measurement
 
@@ -30,9 +31,41 @@ def extract_type(folder_path: str) -> str:
     return t or base
 
 
-def gather_measurement(folder: str, resample_ms: int) -> Dict:
+def gather_measurement(folder: str, resample_ms: int, reconfig_window: bool = False,
+                       window_seconds: float = 2.0) -> Dict:
     m = Measurement(folder)
     m.load_files()
+
+    reconfig_windows: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
+    if reconfig_window:
+        if m.data_dishy_sender is None and m.data_dishy_receiver is None:
+            raise ValueError(f"{folder}: --reconfig-window requires Dishy data; skipping measurement.")
+        window_delta = pd.Timedelta(seconds=window_seconds)
+        reconfig_times = m.get_reconfiguration_times()
+        reconfig_windows = [(ts - window_delta, ts + window_delta) for _, ts in reconfig_times]
+        if not reconfig_windows:
+            print(f"Warning: {folder} has --reconfig-window enabled but no reconfiguration events were detected.")
+
+    def apply_reconfig_window(series):
+        if not reconfig_window or series is None:
+            return series
+        if series.empty:
+            return series
+        if not isinstance(series.index, pd.DatetimeIndex):
+            raise ValueError(f"{folder}: Cannot apply --reconfig-window because series index is not datetime based.")
+        mask = np.zeros(len(series), dtype=bool)
+        idx = series.index
+        for start, end in reconfig_windows:
+            mask |= (idx >= start) & (idx <= end)
+        return series[mask]
+
+    def series_to_list(series, scale: float = 1.0) -> List[float]:
+        if series is None:
+            return []
+        filtered = apply_reconfig_window(series)
+        if filtered is None or filtered.empty:
+            return []
+        return (filtered.to_numpy() * scale).tolist()
 
     bitrate_values_mbps: List[float] = []
     rtt_values_ms: List[float] = []
@@ -41,34 +74,34 @@ def gather_measurement(folder: str, resample_ms: int) -> Dict:
 
     # Bitrate preference mirrors old script intent (receiver preferred)
     if m.data_iperf_receiver is not None:
-        recv = m.get_recv_bitrate_kbps(resample_ms)
-        if recv is not None:
-            bitrate_values_mbps = (recv.to_numpy() / 1000.0).tolist()
+        recv_vals = series_to_list(m.get_recv_bitrate_kbps(resample_ms), scale=0.001)
+        if recv_vals:
+            bitrate_values_mbps = recv_vals
             source_used = "iperf (receiver)"
     elif m.data_iperf_sender is not None:
-        send = m.get_send_bitrate_kbps(resample_ms)
-        if send is not None:
-            bitrate_values_mbps = (send.to_numpy() / 1000.0).tolist()
+        send_vals = series_to_list(m.get_send_bitrate_kbps(resample_ms), scale=0.001)
+        if send_vals:
+            bitrate_values_mbps = send_vals
             source_used = "iperf (sender)"
     elif m.data_parquet_receiver is not None:
-        recv = m.get_recv_bitrate_kbps(resample_ms)
-        if recv is not None:
-            bitrate_values_mbps = (recv.to_numpy() / 1000.0).tolist()
+        recv_vals = series_to_list(m.get_recv_bitrate_kbps(resample_ms), scale=0.001)
+        if recv_vals:
+            bitrate_values_mbps = recv_vals
             source_used = "parquet (receiver)"
     elif m.data_parquet_sender is not None:
-        send = m.get_send_bitrate_kbps(resample_ms)
-        if send is not None:
-            bitrate_values_mbps = (send.to_numpy() / 1000.0).tolist()
+        send_vals = series_to_list(m.get_send_bitrate_kbps(resample_ms), scale=0.001)
+        if send_vals:
+            bitrate_values_mbps = send_vals
             source_used = "parquet (sender)"
 
-    rtt = m.get_rtt_ms()
-    if rtt is not None:
-        rtt_values_ms = rtt.to_numpy().tolist()
+    rtt = series_to_list(m.get_rtt_ms())
+    if rtt:
+        rtt_values_ms = rtt
         source_used = source_used or "rtt"
 
-    jitter = m.get_jitter_ms()
-    if jitter is not None:
-        jitter_values_ms = jitter.to_numpy().tolist()
+    jitter = series_to_list(m.get_jitter_ms())
+    if jitter:
+        jitter_values_ms = jitter
         source_used = source_used or "jitter"
 
     base = os.path.basename(os.path.normpath(folder))
@@ -91,11 +124,14 @@ def main():
     parser.add_argument("paths", nargs="+", help="One or more paths to measurement folders or a root folder containing them")
     parser.add_argument("--resample-ms", type=int, default=100, help="Resample interval for rate calculations in ms (default: 100)")
     parser.add_argument("--combined-only", action="store_true", help="Show only one aggregated CDF per category (type) and hide individual measurements")
+    parser.add_argument("--reconfig-window", action="store_true",
+                        help="Limit samples to ±1s around each Dishy reconfiguration event (measurements without Dishy data are skipped)")
     args = parser.parse_args()
 
     folders: List[str] = args.paths
     resample_ms: int = args.resample_ms
     combined_only: bool = args.combined_only
+    use_reconfig_window: bool = args.reconfig_window
 
     if len(folders) == 1 and os.path.isdir(folders[0]):
         root = folders[0]
@@ -119,7 +155,7 @@ def main():
             print(f"Warning: Skipping non-directory path: {folder}")
             continue
         try:
-            datasets.append(gather_measurement(folder, resample_ms))
+            datasets.append(gather_measurement(folder, resample_ms, use_reconfig_window))
         except Exception as e:
             print(f"Warning: {e}")
 
@@ -151,13 +187,15 @@ def main():
 
     shown_labels = set()
 
+    window_suffix = " (±1s around Dishy reconfigurations)" if use_reconfig_window else ""
+
     def plot_metric(ax, metric_key: str, x_label: str, title: str, has_data: bool):
         if not has_data:
             ax.set_title(f"{title} (no data)")
             ax.set_xticks([])
             ax.set_yticks([])
             return
-        ax.set_title(title)
+        ax.set_title(f"{title}{window_suffix}")
         if combined_only:
             ax.set_xlabel(x_label)
             ax.set_ylabel("Probability")
@@ -221,7 +259,7 @@ def main():
 
     names_for_title = ", ".join(d["name"] for d in datasets)
     title_mode = "Combined" if combined_only else "Individual + Combined"
-    fig.suptitle(f"{title_mode} CDFs for Bitrate, RTT, Jitter | Folders: {names_for_title}", fontsize=14)
+    fig.suptitle(f"{title_mode} CDFs for Bitrate, RTT, Jitter | Folders: {names_for_title}{window_suffix}", fontsize=14)
     fig.tight_layout(rect=(0, 0.03, 1, 0.97))
     plt.show()
 
