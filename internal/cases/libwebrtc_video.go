@@ -3,7 +3,6 @@ package cases
 import (
 	"bufio"
 	"encoding/json"
-	"github.com/rs/zerolog/log"
 	"os"
 	"os/exec"
 	"path"
@@ -13,6 +12,8 @@ import (
 	"time"
 	"webrtc-bench/internal/cases/stats"
 	"webrtc-bench/internal/results"
+
+	"github.com/rs/zerolog/log"
 )
 
 type CaseVideoLibWebRTC struct {
@@ -114,10 +115,16 @@ func (c *CaseVideoLibWebRTC) Configure(config PeerCaseConfig, sendSignal func(si
 		bitrateStr = "10000"
 	}
 
+	targetFpsStr, ok := config.AdditionalConfig["target_fps"]
+	if !ok {
+		targetFpsStr = "60"
+	}
+
 	args := []string{
 		"--sender", strconv.FormatBool(config.SendOffer),
 		"--bitrate", bitrateStr, "--ice", config.ICEServers[0],
 		"--stat-interval", strconv.Itoa(int(time.Duration(config.StatInterval).Milliseconds())),
+		"--target-fps", targetFpsStr,
 	}
 
 	if val, ok := config.AdditionalConfig["use_ffmpeg_source"]; ok && val == "true" {
