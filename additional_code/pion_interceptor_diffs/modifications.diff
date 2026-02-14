@@ -1,0 +1,161 @@
+diff --git a/pkg/gcc/send_side_bwe.go b/pkg/gcc/send_side_bwe.go
+index 5cc3d01..1053fb4 100644
+--- a/pkg/gcc/send_side_bwe.go
++++ b/pkg/gcc/send_side_bwe.go
+@@ -49,11 +49,12 @@ type SendSideBWE struct {
+ 
+ 	onTargetBitrateChange func(bitrate int)
+ 
+-	lock          sync.Mutex
+-	latestStats   Stats
+-	latestBitrate int
+-	minBitrate    int
+-	maxBitrate    int
++	lock              sync.Mutex
++	latestStats       Stats
++	latestBitrate     int
++	minBitrate        int
++	maxBitrate        int
++	lastBitrateUpdate time.Time
+ 
+ 	close     chan struct{}
+ 	closeLock sync.RWMutex
+@@ -219,6 +220,11 @@ func (e *SendSideBWE) WriteRTCP(pkts []rtcp.Packet, _ interceptor.Attributes) er
+ 		e.lossController.updateLossEstimate(acks)
+ 		e.delayController.updateDelayEstimate(acks)
+ 	}
++	e.lock.Lock()
++	if e.lastBitrateUpdate.Add(time.Second).Before(time.Now()) && e.latestStats.DelayStats.TargetBitrate >= e.minBitrate {
++		go e.forceBitrateUpdate()
++	}
++	e.lock.Unlock()
+ 
+ 	return nil
+ }
+@@ -277,10 +283,19 @@ func (e *SendSideBWE) Close() error {
+ 	return e.pacer.Close()
+ }
+ 
++func (e *SendSideBWE) forceBitrateUpdate() {
++	e.lock.Lock()
++	delayStats := e.latestStats.DelayStats
++	e.lock.Unlock()
++
++	e.onDelayUpdate(delayStats)
++}
++
+ func (e *SendSideBWE) onDelayUpdate(delayStats DelayStats) {
+ 	e.lock.Lock()
+ 	defer e.lock.Unlock()
+ 
++	e.lastBitrateUpdate = time.Now()
+ 	lossStats := e.lossController.getEstimate(delayStats.TargetBitrate)
+ 	bitrateChanged := false
+ 	bitrate := minInt(delayStats.TargetBitrate, lossStats.TargetBitrate)
+diff --git a/pkg/nack/generator_interceptor.go b/pkg/nack/generator_interceptor.go
+index 10c8a01..a9f5c69 100644
+--- a/pkg/nack/generator_interceptor.go
++++ b/pkg/nack/generator_interceptor.go
+@@ -4,6 +4,7 @@
+ package nack
+ 
+ import (
++	"encoding/binary"
+ 	"math/rand"
+ 	"sync"
+ 	"time"
+@@ -94,10 +95,25 @@ func (n *GeneratorInterceptor) BindRemoteStream(
+ 		return reader
+ 	}
+ 
++	isRTX := false
+ 	// error is already checked in NewGeneratorInterceptor
+-	receiveLog, _ := newReceiveLog(n.size)
+ 	n.receiveLogsMu.Lock()
+-	n.receiveLogs[info.SSRC] = receiveLog
++	var receiveLog *receiveLog = nil
++	if info.SSRCRetransmission != 0 {
++		n.log.Infof("ssrc %d has rtx ssrc %d, creating shared receiveLog", info.SSRC, info.SSRCRetransmission)
++		receiveLog, _ = newReceiveLog(n.size)
++		receiveLog.ssrc = info.SSRC
++		n.receiveLogs[info.SSRCRetransmission] = receiveLog
++		n.receiveLogs[info.SSRC] = receiveLog
++	} else if existingLog, ok := n.receiveLogs[info.SSRC]; ok {
++		n.log.Infof("ssrc %d seems to be rtx, reusing receiveLog", info.SSRC)
++		receiveLog = existingLog
++		isRTX = true
++	} else {
++		n.log.Infof("ssrc %d unknown, creating new receiveLog", info.SSRC)
++		receiveLog, _ = newReceiveLog(n.size)
++		n.receiveLogs[info.SSRC] = receiveLog
++	}
+ 	n.receiveLogsMu.Unlock()
+ 
+ 	return interceptor.RTPReaderFunc(func(b []byte, a interceptor.Attributes) (int, interceptor.Attributes, error) {
+@@ -109,11 +125,26 @@ func (n *GeneratorInterceptor) BindRemoteStream(
+ 		if attr == nil {
+ 			attr = make(interceptor.Attributes)
+ 		}
+-		header, err := attr.GetRTPHeader(b[:i])
+-		if err != nil {
+-			return 0, nil, err
++		var seqNum uint16
++
++		if isRTX {
++			hasExtension := b[0]&0b10000 > 0
++			csrcCount := b[0] & 0b1111
++			headerLength := uint16(12 + (4 * csrcCount))
++			if hasExtension {
++				headerLength += 4 * (1 + binary.BigEndian.Uint16(b[headerLength+2:headerLength+4]))
++			}
++			seqNum = binary.BigEndian.Uint16(b[headerLength : headerLength+2])
++		} else {
++			header, err := attr.GetRTPHeader(b[:i])
++			if err != nil {
++				return 0, nil, err
++			}
++			seqNum = header.SequenceNumber
+ 		}
+-		receiveLog.add(header.SequenceNumber)
++
++		receiveLog.add(seqNum)
++		n.log.Tracef("received %d on ssrc %d", seqNum, info.SSRC)
+ 
+ 		return i, attr, nil
+ 	})
+@@ -158,7 +189,11 @@ func (n *GeneratorInterceptor) loop(rtcpWriter interceptor.RTCPWriter) {
+ 				defer n.receiveLogsMu.Unlock()
+ 
+ 				for ssrc, receiveLog := range n.receiveLogs {
++					if receiveLog.ssrc != ssrc {
++						continue
++					}
+ 					missing := receiveLog.missingSeqNumbers(n.skipLastN, missingPacketSeqNums)
++					n.log.Tracef("ssrc %d missing: %v", ssrc, missing)
+ 
+ 					if len(missing) == 0 || n.nackCountLogs[ssrc] == nil {
+ 						n.nackCountLogs[ssrc] = map[uint16]uint16{}
+diff --git a/pkg/nack/receive_log.go b/pkg/nack/receive_log.go
+index c37407d..94c2f76 100644
+--- a/pkg/nack/receive_log.go
++++ b/pkg/nack/receive_log.go
+@@ -11,6 +11,7 @@ import (
+ )
+ 
+ type receiveLog struct {
++	ssrc            uint32
+ 	packets         []uint64
+ 	size            uint16
+ 	end             uint16
+diff --git a/pkg/nack/responder_interceptor.go b/pkg/nack/responder_interceptor.go
+index 8b5585a..6cbd601 100644
+--- a/pkg/nack/responder_interceptor.go
++++ b/pkg/nack/responder_interceptor.go
+@@ -152,6 +152,7 @@ func (n *ResponderInterceptor) resendPackets(nack *rtcp.TransportLayerNack) {
+ 	}
+ 
+ 	for i := range nack.Nacks {
++		n.log.Tracef("resending packets %v", nack.Nacks[i].PacketList())
+ 		nack.Nacks[i].Range(func(seq uint16) bool {
+ 			stream.rtpBufferMutex.Lock()
+ 			defer stream.rtpBufferMutex.Unlock()

@@ -1,0 +1,1608 @@
+diff --git a/api/BUILD.gn b/api/BUILD.gn
+index f7aa830397..f44fbc89d1 100644
+--- a/api/BUILD.gn
++++ b/api/BUILD.gn
+@@ -1765,3 +1765,11 @@ rtc_library("frame_transformer_factory") {
+     "video:video_frame_metadata",
+   ]
+ }
++
++rtc_library("safe_ostream") {
++  visibility = [ "*" ]
++  sources = [
++    "safe_ostream.cc",
++    "safe_ostream.h",
++  ]
++}
+diff --git a/api/safe_ostream.cc b/api/safe_ostream.cc
+new file mode 100644
+index 0000000000..c5d3b616eb
+--- /dev/null
++++ b/api/safe_ostream.cc
+@@ -0,0 +1,28 @@
++/*
++ *  Copyright (c) 2025 The WebRTC project authors. All Rights Reserved.
++ *
++ *  Use of this source code is governed by a BSD-style license
++ *  that can be found in the LICENSE file in the root of the source
++ *  tree. An additional intellectual property rights grant can be found
++ *  in the file PATENTS.  All contributing project authors may
++ *  be found in the AUTHORS file in the root of the source tree.
++ */
++
++#include "api/safe_ostream.h"
++
++#include <iostream>
++
++namespace webrtc {
++
++// Define accessor functions with function-local statics
++safe_ostream& safe_cout() {
++  static safe_ostream instance(std::cout);
++  return instance;
++}
++
++safe_ostream& safe_cerr() {
++  static safe_ostream instance(std::cerr);
++  return instance;
++}
++
++}  // namespace webrtc
+diff --git a/api/safe_ostream.h b/api/safe_ostream.h
+new file mode 100644
+index 0000000000..32c1fbd92c
+--- /dev/null
++++ b/api/safe_ostream.h
+@@ -0,0 +1,60 @@
++// Source: https://github.com/dkorolev/felicity/blob/master/safe_ostream.h (MIT)
++
++#ifndef API_SYNCED_STDOUT_H_
++#define API_SYNCED_STDOUT_H_
++
++#include <cassert>
++#include <iostream>
++#include <mutex>
++#include <memory>
++
++namespace webrtc {
++  struct safe_ostream {
++  struct guarded_impl {
++    guarded_impl() = delete;
++    guarded_impl(const guarded_impl&) = delete;
++    void operator=(const guarded_impl&) = delete;
++    guarded_impl(std::ostream& ostream, std::mutex& mutex) : ostream_(ostream), guard_(mutex) {
++    }
++    ~guarded_impl() {
++      ostream_.flush();
++    }
++    template<typename T> void write(const T& x) {
++      ostream_ << x;
++    }
++    std::ostream& ostream_;
++    std::lock_guard<std::mutex> guard_;
++  };
++  struct impl {
++    impl() = delete;
++    void operator=(const impl&) = delete;
++    impl(std::ostream& ostream, std::mutex& mutex) : unique_impl_(new guarded_impl(ostream, mutex)) {
++    }
++    impl(const impl& rhs) {
++      assert(rhs.unique_impl_.get());
++      unique_impl_.swap(rhs.unique_impl_);
++    }
++    template<typename T> impl& operator<<(const T& x) {
++      guarded_impl* p = unique_impl_.get();
++      assert(p);
++      p->write(x);
++      return *this;
++    }
++    mutable std::unique_ptr<guarded_impl> unique_impl_;
++  };
++  explicit safe_ostream(std::ostream& ostream) : ostream_(ostream) {
++  }
++  template<typename T> impl operator<<(const T& x) {
++    return impl(ostream_, mutex_) << x;
++  }
++  std::ostream& ostream_;
++  std::mutex mutex_;
++};
++
++// Accessor functions to avoid global constructors
++safe_ostream& safe_cout();
++safe_ostream& safe_cerr();
++
++}
++
++#endif  // API_SYNCED_STDOUT_H_
+\ No newline at end of file
+diff --git a/api/transport/network_types.h b/api/transport/network_types.h
+index 6fc773424a..a59a284b8a 100644
+--- a/api/transport/network_types.h
++++ b/api/transport/network_types.h
+@@ -260,6 +260,7 @@ struct RTC_EXPORT NetworkControlUpdate {
+   std::optional<PacerConfig> pacer_config;
+   std::vector<ProbeClusterConfig> probe_cluster_configs;
+   std::optional<TargetTransferRate> target_rate;
++  bool request_keyframe = false;
+ };
+ 
+ // Process control
+diff --git a/call/call.cc b/call/call.cc
+index e500c02b29..f6d086285e 100644
+--- a/call/call.cc
++++ b/call/call.cc
+@@ -746,6 +746,19 @@ Call::Call(CallConfig config,
+ 
+   call_stats_->RegisterStatsObserver(&receive_side_cc_);
+ 
++  // Register callback for keyframe requests from congestion controller
++  transport_send_ptr_->SetKeyFrameRequestCallback([this]() {
++    // May be called from transport controller thread, post to worker thread
++    worker_thread_->PostTask([this]() {
++      RTC_DCHECK_RUN_ON(worker_thread_);
++      RTC_LOG(LS_INFO) << "Keyframe requested by congestion controller for "
++                       << video_send_streams_.size() << " video streams";
++      for (auto* video_stream : video_send_streams_) {
++        video_stream->GenerateKeyFrame({});
++      }
++    });
++  });
++
+   ReceiveSideCongestionController* receive_side_cc = &receive_side_cc_;
+   receive_side_cc_periodic_task_ = RepeatingTaskHandle::Start(
+       worker_thread_,
+diff --git a/call/rtp_transport_controller_send.cc b/call/rtp_transport_controller_send.cc
+index 4265205698..d270cf93e4 100644
+--- a/call/rtp_transport_controller_send.cc
++++ b/call/rtp_transport_controller_send.cc
+@@ -708,6 +708,12 @@ void RtpTransportControllerSend::OnRemoteNetworkEstimate(
+     PostUpdates(controller_->OnNetworkStateEstimate(estimate));
+ }
+ 
++void RtpTransportControllerSend::SetKeyFrameRequestCallback(
++    std::function<void()> callback) {
++  RTC_DCHECK_RUN_ON(&sequence_checker_);
++  keyframe_request_callback_ = std::move(callback);
++}
++
+ void RtpTransportControllerSend::MaybeCreateControllers() {
+   RTC_DCHECK(!controller_);
+   RTC_DCHECK(!control_handler_);
+@@ -807,6 +813,11 @@ void RtpTransportControllerSend::PostUpdates(NetworkControlUpdate update) {
+     control_handler_->SetTargetRate(*update.target_rate);
+     UpdateControlState();
+   }
++  if (update.request_keyframe && keyframe_request_callback_) {
++    // Trigger keyframe through registered callback
++    RTC_LOG(LS_INFO) << "Keyframe requested by congestion controller";
++    keyframe_request_callback_();
++  }
+ }
+ 
+ void RtpTransportControllerSend::OnReport(
+diff --git a/call/rtp_transport_controller_send.h b/call/rtp_transport_controller_send.h
+index 6335379e3c..b54b5f0310 100644
+--- a/call/rtp_transport_controller_send.h
++++ b/call/rtp_transport_controller_send.h
+@@ -13,6 +13,7 @@
+ 
+ #include <cstddef>
+ #include <cstdint>
++#include <functional>
+ #include <map>
+ #include <memory>
+ #include <optional>
+@@ -148,6 +149,10 @@ class RtpTransportControllerSend final
+   std::optional<int> ReceivedCongestionControlFeedbackCount() const override;
+   std::optional<int> ReceivedTransportCcFeedbackCount() const override;
+ 
++  // Registers a callback that will be invoked when the congestion controller
++  // requests a keyframe (e.g., due to network reconfiguration detection).
++  void SetKeyFrameRequestCallback(std::function<void()> callback) override;
++
+  private:
+   void MaybeCreateControllers() RTC_RUN_ON(sequence_checker_);
+   void HandleTransportPacketsFeedback(const TransportPacketsFeedback& feedback)
+@@ -246,6 +251,10 @@ class RtpTransportControllerSend final
+   // Protected by internal locks.
+   RateLimiter retransmission_rate_limiter_;
+ 
++  // Callback invoked when congestion controller requests a keyframe.
++  std::function<void()> keyframe_request_callback_
++      RTC_GUARDED_BY(sequence_checker_);
++
+   ScopedTaskSafety safety_;
+ };
+ 
+diff --git a/call/rtp_transport_controller_send_interface.h b/call/rtp_transport_controller_send_interface.h
+index af191d6a00..4b3784ec09 100644
+--- a/call/rtp_transport_controller_send_interface.h
++++ b/call/rtp_transport_controller_send_interface.h
+@@ -13,6 +13,7 @@
+ #include <stddef.h>
+ #include <stdint.h>
+ 
++#include <functional>
+ #include <map>
+ #include <memory>
+ #include <optional>
+@@ -165,6 +166,10 @@ class RtpTransportControllerSendInterface {
+   virtual std::optional<int> ReceivedCongestionControlFeedbackCount() const = 0;
+   // Count of transport-cc feedback reports received
+   virtual std::optional<int> ReceivedTransportCcFeedbackCount() const = 0;
++
++  // Registers a callback that will be invoked when the congestion controller
++  // requests a keyframe (e.g., due to network reconfiguration detection).
++  virtual void SetKeyFrameRequestCallback(std::function<void()> callback) = 0;
+ };
+ 
+ }  // namespace webrtc
+diff --git a/modules/congestion_controller/goog_cc/BUILD.gn b/modules/congestion_controller/goog_cc/BUILD.gn
+index 5d65bc2c6d..0ebe2c544b 100644
+--- a/modules/congestion_controller/goog_cc/BUILD.gn
++++ b/modules/congestion_controller/goog_cc/BUILD.gn
+@@ -22,8 +22,11 @@ rtc_library("goog_cc") {
+     ":probe_controller",
+     ":pushback_controller",
+     ":send_side_bwe",
++    ":reconfiguration_detector",
++    ":starlink_reconfiguration_guard",
+     "../../../api:field_trials_view",
+     "../../../api:network_state_predictor_api",
++    "../../../api:safe_ostream",
+     "../../../api/environment",
+     "../../../api/transport:bandwidth_usage",
+     "../../../api/transport:network_control",
+@@ -223,6 +226,22 @@ rtc_library("probe_controller") {
+   ]
+ }
+ 
++rtc_library("reconfiguration_detector") {
++  sources = [
++    "reconfiguration_detector.cc",
++    "reconfiguration_detector.h",
++  ]
++  deps = []
++}
++
++rtc_library("starlink_reconfiguration_guard") {
++  sources = [
++    "starlink_reconfiguration_guard.cc",
++    "starlink_reconfiguration_guard.h",
++  ]
++  deps = []
++}
++
+ if (rtc_include_tests) {
+   rtc_library("test_goog_cc_printer") {
+     testonly = true
+diff --git a/modules/congestion_controller/goog_cc/delay_based_bwe.cc b/modules/congestion_controller/goog_cc/delay_based_bwe.cc
+index cd076a780b..584979869b 100644
+--- a/modules/congestion_controller/goog_cc/delay_based_bwe.cc
++++ b/modules/congestion_controller/goog_cc/delay_based_bwe.cc
+@@ -31,6 +31,7 @@
+ #include "modules/congestion_controller/goog_cc/inter_arrival_delta.h"
+ #include "modules/congestion_controller/goog_cc/trendline_estimator.h"
+ #include "modules/remote_bitrate_estimator/include/bwe_defines.h"
++#include "modules/congestion_controller/goog_cc/starlink_reconfiguration_guard.h"
+ #include "rtc_base/checks.h"
+ #include "rtc_base/experiments/struct_parameters_parser.h"
+ #include "rtc_base/logging.h"
+@@ -117,6 +118,38 @@ DelayBasedBwe::Result DelayBasedBwe::IncomingPacketFeedbackVector(
+                               BweNames::kBweNamesMax);
+     uma_recorded_ = true;
+   }
++
++  if (!starlink_guard_shared_) {
++    const auto config = std::make_unique<StarlinkGuardConfig>();
++    config->enabled = key_value_config_->IsEnabled("StarlinkReconfigurationGuard");
++    starlink_guard_shared_ = std::make_shared<StarlinkReconfigurationGuard>(*config);
++  }
++
++  const TimeDelta since_last_fb =
++      last_feedback_time_for_guard_.IsMinusInfinity()
++          ? TimeDelta::Zero()
++          : (msg.feedback_time - last_feedback_time_for_guard_);
++  last_feedback_time_for_guard_ = msg.feedback_time;
++  const double ack_bps =
++      acked_bitrate.has_value() ? acked_bitrate->bps<double>() : 0.0;
++
++  if (video_delay_detector_) {
++    if (starlink_guard_shared_ && !video_delay_detector_->HasStarlinkGuard()) {
++      video_delay_detector_->SetStarlinkGuard(starlink_guard_shared_);
++      RTC_LOG(LS_INFO) << "Inserted StarlinkReconfigurationGuard into video delay detector";
++    }
++    video_delay_detector_->NotifyFeedbackWindow(
++        since_last_fb.ms(), ack_bps, msg.feedback_time.ms());
++  }
++  if (audio_delay_detector_) {
++    if (starlink_guard_shared_ && !video_delay_detector_->HasStarlinkGuard()) {
++      audio_delay_detector_->SetStarlinkGuard(starlink_guard_shared_);
++      RTC_LOG(LS_INFO) << "Inserted StarlinkReconfigurationGuard into audio delay detector";
++    }
++    audio_delay_detector_->NotifyFeedbackWindow(
++        since_last_fb.ms(), ack_bps, msg.feedback_time.ms());
++  }
++
+   bool delayed_feedback = true;
+   bool recovered_from_overuse = false;
+   BandwidthUsage prev_detector_state = active_delay_detector_->State();
+@@ -216,6 +249,12 @@ DelayBasedBwe::Result DelayBasedBwe::MaybeUpdateEstimate(
+     Timestamp at_time) {
+   Result result;
+ 
++  if (pause_update_reconfig_) {
++    result.updated = true;
++    result.probe = false;
++    result.target_bitrate = rate_control_.LatestEstimate() / 2;
++    return result;
++  }
+   // Currently overusing the bandwidth.
+   if (active_delay_detector_->State() == BandwidthUsage::kBwOverusing) {
+     if (acked_bitrate &&
+@@ -307,4 +346,19 @@ TimeDelta DelayBasedBwe::GetExpectedBwePeriod() const {
+   return rate_control_.GetExpectedBandwidthPeriod();
+ }
+ 
++double DelayBasedBwe::GetLastDelayMeasurement() const {
++  // Returns the last raw delay measurement (e.g., trendline or similar)
++  return video_delay_detector_->GetLastRawDelay();
++}
++
++double DelayBasedBwe::GetCurrentDelayTrend() const {
++  // Returns the current delay estimate (e.g., trendline value)
++  return active_delay_detector_ ? active_delay_detector_->GetTrendlineValue() : 0.0;
++}
++
++double DelayBasedBwe::GetDelayThreshold() const {
++  // Returns the threshold used for overuse detection
++  return active_delay_detector_ ? active_delay_detector_->GetThreshold() : 0.0;
++}
++
+ }  // namespace webrtc
+diff --git a/modules/congestion_controller/goog_cc/delay_based_bwe.h b/modules/congestion_controller/goog_cc/delay_based_bwe.h
+index 4f02e2e7fc..02456896f4 100644
+--- a/modules/congestion_controller/goog_cc/delay_based_bwe.h
++++ b/modules/congestion_controller/goog_cc/delay_based_bwe.h
+@@ -32,6 +32,7 @@
+ #include "modules/remote_bitrate_estimator/inter_arrival.h"
+ #include "rtc_base/experiments/struct_parameters_parser.h"
+ #include "rtc_base/race_checker.h"
++#include "modules/congestion_controller/goog_cc/starlink_reconfiguration_guard.h"
+ 
+ namespace webrtc {
+ class RtcEventLog;
+@@ -88,6 +89,16 @@ class DelayBasedBwe {
+   DataRate last_estimate() const { return prev_bitrate_; }
+   BandwidthUsage last_state() const { return prev_state_; }
+ 
++  double GetLastDelayMeasurement() const;
++  double GetCurrentDelayTrend() const;
++  double GetDelayThreshold() const;
++  void SetPauseUpdateReconfig(bool pause_update_reconfig) {
++    pause_update_reconfig_ = pause_update_reconfig;
++  }
++  bool JustFinishedReconfig() const {
++    return starlink_guard_shared_ != nullptr && starlink_guard_shared_->JustFinishedReconfig();
++  }
++
+  private:
+   friend class GoogCcStatePrinter;
+   void IncomingPacketFeedback(const PacketResult& packet_feedback,
+@@ -129,6 +140,9 @@ class DelayBasedBwe {
+   AimdRateControl rate_control_;
+   DataRate prev_bitrate_;
+   BandwidthUsage prev_state_;
++  bool pause_update_reconfig_ = false;
++  Timestamp last_feedback_time_for_guard_ = Timestamp::MinusInfinity();
++  std::shared_ptr<StarlinkReconfigurationGuard> starlink_guard_shared_;
+ };
+ 
+ }  // namespace webrtc
+diff --git a/modules/congestion_controller/goog_cc/delay_increase_detector_interface.h b/modules/congestion_controller/goog_cc/delay_increase_detector_interface.h
+index 977d320557..8c4c7e8cc9 100644
+--- a/modules/congestion_controller/goog_cc/delay_increase_detector_interface.h
++++ b/modules/congestion_controller/goog_cc/delay_increase_detector_interface.h
+@@ -11,10 +11,12 @@
+ #define MODULES_CONGESTION_CONTROLLER_GOOG_CC_DELAY_INCREASE_DETECTOR_INTERFACE_H_
+ 
+ #include <stdint.h>
+-
++#include <iostream>
+ #include <cstddef>
+ 
++#include "rtc_base/logging.h"
+ #include "api/transport/bandwidth_usage.h"
++#include "modules/congestion_controller/goog_cc/starlink_reconfiguration_guard.h"
+ 
+ namespace webrtc {
+ 
+@@ -37,6 +39,22 @@ class DelayIncreaseDetectorInterface {
+                       size_t packet_size,
+                       bool calculated_deltas) = 0;
+ 
++  virtual void NotifyFeedbackWindow(int64_t since_last_feedback_ms,
++                              double acked_bitrate_bps,
++                              int64_t now_ms) {}
++
++  virtual void SetStarlinkGuard(std::shared_ptr<StarlinkReconfigurationGuard> guard) {
++    RTC_LOG(LS_ERROR) << "SetStarlinkGuard not implemented in the active delay detector.";
++  }
++
++  virtual bool HasStarlinkGuard() {
++    return false;
++  }
++
++  virtual double GetLastRawDelay() const = 0;
++  virtual double GetTrendlineValue() const = 0;
++  virtual double GetThreshold() const = 0;
++
+   virtual BandwidthUsage State() const = 0;
+ };
+ 
+diff --git a/modules/congestion_controller/goog_cc/goog_cc_network_control.cc b/modules/congestion_controller/goog_cc/goog_cc_network_control.cc
+index 4aa7e88fad..0898fbc8e5 100644
+--- a/modules/congestion_controller/goog_cc/goog_cc_network_control.cc
++++ b/modules/congestion_controller/goog_cc/goog_cc_network_control.cc
+@@ -17,10 +17,13 @@
+ #include <optional>
+ #include <utility>
+ #include <vector>
++#include <iostream>
++#include <iomanip>
+ 
+ #include "absl/strings/string_view.h"
+ #include "api/environment/environment.h"
+ #include "api/field_trials_view.h"
++#include "api/safe_ostream.h"
+ #include "api/transport/bandwidth_usage.h"
+ #include "api/transport/network_control.h"
+ #include "api/transport/network_types.h"
+@@ -123,6 +126,7 @@ GoogCcNetworkController::GoogCcNetworkController(NetworkControllerConfig config,
+                                          network_state_predictor_.get())),
+       acknowledged_bitrate_estimator_(
+           AcknowledgedBitrateEstimatorInterface::Create(&env_.field_trials())),
++      reconfiguration_detector_(std::make_unique<ReconfigurationDetector>()),
+       initial_config_(config),
+       last_loss_based_target_rate_(*config.constraints.starting_rate),
+       last_pushback_target_rate_(last_loss_based_target_rate_),
+@@ -140,6 +144,21 @@ GoogCcNetworkController::GoogCcNetworkController(NetworkControllerConfig config,
+       env_.field_trials().Lookup("WebRTC-Bwe-SafeResetOnRouteChange"));
+   if (delay_based_bwe_)
+     delay_based_bwe_->SetMinBitrate(kCongestionControllerMinBitrate);
++  auto max_probing_kbps_str = env_.field_trials().Lookup("StarlinkGuardProbingMaxKbps");
++  if (!max_probing_kbps_str.empty()) {
++    auto max_probing_kbps = std::stoi(max_probing_kbps_str);
++    if (max_probing_kbps > 0) {
++      max_data_rate_slguard_probe_ = DataRate::KilobitsPerSec(max_probing_kbps);
++    }
++  }
++  
++  interval_detection_enabled_ = env_.field_trials().IsEnabled("StarlinkIntervalDetection");
++  guard_probing_enabled_ = env_.field_trials().IsEnabled("StarlinkGuardProbing");
++  guard_self_fir_enabled_ = env_.field_trials().IsEnabled("StarlinkGuardSelfFIR");
++  
++  RTC_LOG(LS_INFO) << "StarlinkIntervalDetection: " << (interval_detection_enabled_ ? "Enabled" : "Disabled")
++                   << ", StarlinkGuardProbing: " << (guard_probing_enabled_ ? "Enabled" : "Disabled")
++                   << ", StarlinkGuardSelfFIR: " << (guard_self_fir_enabled_ ? "Enabled" : "Disabled");
+ }
+ 
+ GoogCcNetworkController::~GoogCcNetworkController() {}
+@@ -214,6 +233,12 @@ NetworkControlUpdate GoogCcNetworkController::OnProcessInterval(
+     }
+     initial_config_.reset();
+   }
++  auto detected_reconfig = false;
++  if (interval_detection_enabled_) {
++    reconfiguration_detector_->update_delay_trend(static_cast<float>(delay_based_bwe_->GetCurrentDelayTrend()));
++    detected_reconfig = reconfiguration_detector_->is_in_reconfiguration();
++    delay_based_bwe_->SetPauseUpdateReconfig(detected_reconfig);
++  }
+   if (congestion_window_pushback_controller_ && msg.pacer_queue) {
+     congestion_window_pushback_controller_->UpdatePacingQueue(
+         msg.pacer_queue->bytes());
+@@ -236,7 +261,46 @@ NetworkControlUpdate GoogCcNetworkController::OnProcessInterval(
+   } else {
+     update.congestion_window = current_data_window_;
+   }
++
++  if (delay_based_bwe_->JustFinishedReconfig()) {
++    if (guard_probing_enabled_) {
++      std::ostringstream out_string_stream;
++      out_string_stream << "Starlink Reconfiguration Guard triggering probe at " << msg.at_time.ms() << " ms\n";
++      webrtc::safe_cout() << out_string_stream.str();
++      if (bandwidth_estimation_->target_rate() > max_data_rate_slguard_probe_) {
++        webrtc::safe_cout() << "Starlink Reconfiguration Guard skipping probe since current estimate is above max for probing.\n";
++      } else {
++        auto clusters = probe_controller_->ReprobeAfterExternalPathChange(bandwidth_estimation_->target_rate(), msg.at_time);
++        update.probe_cluster_configs.insert(update.probe_cluster_configs.end(), clusters.begin(), clusters.end());
++      }
++    }
++    if (guard_self_fir_enabled_) {
++      update.request_keyframe = true;
++      std::ostringstream out_string_stream;
++      out_string_stream << "Starlink Reconfiguration Guard requesting keyframe at " << msg.at_time.ms() << " ms\n";
++      webrtc::safe_cout() << out_string_stream.str();
++    }
++  }
++
+   MaybeTriggerOnNetworkChanged(&update, msg.at_time);
++
++  std::ostringstream stat_string_stream;
++  stat_string_stream << std::fixed << std::setprecision(6);
++  stat_string_stream << "SIGNAL/GCC/{";
++  stat_string_stream << "\"LossTargetBitrate\":" << bandwidth_estimation_->target_rate().bps<int64_t>() << ",";
++  stat_string_stream << "\"AverageLoss\":" << (static_cast<float>(bandwidth_estimation_->fraction_loss()) / 256.0f) << ",";
++  stat_string_stream << "\"DelayTargetBitrate\":" << delay_based_bwe_->last_estimate().bps<int64_t>() << ",";
++  stat_string_stream << "\"DelayMeasurement\":" << delay_based_bwe_->GetLastDelayMeasurement() << ",";
++  stat_string_stream << "\"DelayTrend\":" << delay_based_bwe_->GetCurrentDelayTrend() << ",";
++  stat_string_stream << "\"DelayThreshold\":" << delay_based_bwe_->GetDelayThreshold() << ",";
++  stat_string_stream << "\"Usage\":" << static_cast<int>(delay_based_bwe_->last_state()) << ",";
++  stat_string_stream << "\"State\":" << static_cast<int>(bandwidth_estimation_->loss_based_state()) << ",";
++  stat_string_stream << "\"PushbackTargetBitrate\":" << last_pushback_target_rate_.bps<int64_t>();
++  if (interval_detection_enabled_) {
++    stat_string_stream << ",\"DetectedReconfiguration\":" << (detected_reconfig ? "true" : "false");
++  }
++  stat_string_stream << "}" << std::endl;
++  webrtc::safe_cout() << stat_string_stream.str();
+   return update;
+ }
+ 
+diff --git a/modules/congestion_controller/goog_cc/goog_cc_network_control.h b/modules/congestion_controller/goog_cc/goog_cc_network_control.h
+index 38e6af42b0..a290e23fd4 100644
+--- a/modules/congestion_controller/goog_cc/goog_cc_network_control.h
++++ b/modules/congestion_controller/goog_cc/goog_cc_network_control.h
+@@ -34,6 +34,7 @@
+ #include "modules/congestion_controller/goog_cc/probe_bitrate_estimator.h"
+ #include "modules/congestion_controller/goog_cc/probe_controller.h"
+ #include "modules/congestion_controller/goog_cc/send_side_bandwidth_estimation.h"
++#include "modules/congestion_controller/goog_cc/reconfiguration_detector.h"
+ #include "rtc_base/experiments/field_trial_parser.h"
+ #include "rtc_base/experiments/rate_control_settings.h"
+ 
+@@ -105,6 +106,7 @@ class GoogCcNetworkController : public NetworkControllerInterface {
+   std::unique_ptr<DelayBasedBwe> delay_based_bwe_;
+   std::unique_ptr<AcknowledgedBitrateEstimatorInterface>
+       acknowledged_bitrate_estimator_;
++  std::unique_ptr<ReconfigurationDetector> reconfiguration_detector_;
+ 
+   std::optional<NetworkControllerConfig> initial_config_;
+ 
+@@ -133,6 +135,12 @@ class GoogCcNetworkController : public NetworkControllerInterface {
+   bool previously_in_alr_ = false;
+ 
+   std::optional<DataSize> current_data_window_;
++
++  DataRate max_data_rate_slguard_probe_ = DataRate::PlusInfinity();
++  
++  bool interval_detection_enabled_ = false;
++  bool guard_probing_enabled_ = false;
++  bool guard_self_fir_enabled_ = false;
+ };
+ 
+ }  // namespace webrtc
+diff --git a/modules/congestion_controller/goog_cc/probe_controller.cc b/modules/congestion_controller/goog_cc/probe_controller.cc
+index 4912ed19e9..389322477d 100644
+--- a/modules/congestion_controller/goog_cc/probe_controller.cc
++++ b/modules/congestion_controller/goog_cc/probe_controller.cc
+@@ -15,7 +15,10 @@
+ #include <memory>
+ #include <optional>
+ #include <vector>
++#include <iostream>
++#include <string>
+ 
++#include "api/safe_ostream.h"
+ #include "api/field_trials_view.h"
+ #include "api/rtc_event_log/rtc_event_log.h"
+ #include "api/transport/network_types.h"
+@@ -176,6 +179,37 @@ ProbeController::ProbeController(const FieldTrialsView* key_value_config,
+       event_log_(event_log),
+       config_(ProbeControllerConfig(key_value_config)) {
+   Reset(Timestamp::Zero());
++  auto sl_probe_values = key_value_config->Lookup("StarlinkGuardProbingValues");
++  allow_further_probing_after_guard_engaged_ = key_value_config->IsEnabled("StarlinkGuardProbingAllowFurther");
++  if (!sl_probe_values.empty()) {
++    // Split by dash and parse to int, then devide by 100 to get a fraction.
++    starlink_guard_probing_values_.clear();
++    size_t start = 0;
++    while (start < sl_probe_values.length()) {
++      size_t end = sl_probe_values.find('-', start);
++      std::string token =
++          end == std::string::npos
++              ? sl_probe_values.substr(start)
++              : sl_probe_values.substr(start, end - start);
++      int value = std::stoi(token);
++      if (value > 0) {
++        starlink_guard_probing_values_.push_back(value / 100.0);
++      }
++      if (end == std::string::npos) {
++        break;
++      }
++      start = end + 1;
++    }
++  }
++  
++  std::ostringstream log_msg;
++  log_msg << "ProbeController: StarlinkGuardProbingValues: ";
++  for (double v : starlink_guard_probing_values_) {
++    log_msg << v << " ";
++  }
++  log_msg << "\n Allow further probing after guard engaged: " << allow_further_probing_after_guard_engaged_ << std::endl;
++  RTC_LOG(LS_WARNING) << log_msg.str();
++  webrtc::safe_cout() << log_msg.str();
+ }
+ 
+ ProbeController::~ProbeController() {}
+@@ -625,4 +659,43 @@ std::vector<ProbeClusterConfig> ProbeController::InitiateProbing(
+   return pending_probes;
+ }
+ 
++std::vector<ProbeClusterConfig> ProbeController::ReprobeAfterExternalPathChange(
++    DataRate current_estimate, Timestamp at_time) {
++  if (state_ == State::kWaitingForProbingResult)
++    return {};
++
++  DataRate clamped_estimate = std::min(current_estimate, max_bitrate_);
++  clamped_estimate = std::max(clamped_estimate, start_bitrate_);
++
++  std::vector<DataRate> targets;
++  for (double fraction : starlink_guard_probing_values_) {
++    targets.push_back(clamped_estimate * fraction);
++  }
++
++  if (targets.empty()) {
++    return {};
++  }
++
++  std::ostringstream log_msg;
++  std::ostringstream stat_msg;
++  stat_msg << "SIGNAL/PROBE/";
++  log_msg << "ProbeController: Start probing with targets: ";
++  auto first = true;
++  for (const auto& target : targets) {
++    log_msg << target.bps() << " bps, ";
++    if (!first) {
++      stat_msg << "-";
++    }
++    stat_msg << target.bps();
++    first = false;
++  }
++  log_msg << "at time: " << at_time.ms() << " ms" << std::endl;
++  stat_msg << std::endl;
++  webrtc::safe_cout() << log_msg.str();
++  webrtc::safe_cout() << stat_msg.str();
++
++  bool allow_further = true;
++  return InitiateProbing(at_time, targets, allow_further);
++}
++
+ }  // namespace webrtc
+diff --git a/modules/congestion_controller/goog_cc/probe_controller.h b/modules/congestion_controller/goog_cc/probe_controller.h
+index 9ef8c5459f..29611b0961 100644
+--- a/modules/congestion_controller/goog_cc/probe_controller.h
++++ b/modules/congestion_controller/goog_cc/probe_controller.h
+@@ -163,6 +163,9 @@ class ProbeController {
+   ABSL_MUST_USE_RESULT std::vector<ProbeClusterConfig> Process(
+       Timestamp at_time);
+ 
++  std::vector<ProbeClusterConfig> ReprobeAfterExternalPathChange(
++      DataRate current_estimate, Timestamp at_time);
++
+  private:
+   enum class State {
+     // Initial state where no probing has been triggered yet.
+@@ -212,6 +215,9 @@ class ProbeController {
+   int32_t next_probe_cluster_id_ = 1;
+ 
+   ProbeControllerConfig config_;
++
++  std::vector<double> starlink_guard_probing_values_ = {0.75, 1.25};
++  bool allow_further_probing_after_guard_engaged_ = false;
+ };
+ 
+ }  // namespace webrtc
+diff --git a/modules/congestion_controller/goog_cc/reconfiguration_detector.cc b/modules/congestion_controller/goog_cc/reconfiguration_detector.cc
+new file mode 100644
+index 0000000000..a3a177c58c
+--- /dev/null
++++ b/modules/congestion_controller/goog_cc/reconfiguration_detector.cc
+@@ -0,0 +1,366 @@
++//
++// Created by yannis on 7/5/25.
++//
++
++#include <chrono>
++#include <iostream>
++#include <cmath>
++#include <vector>
++#include <algorithm>
++#include <unordered_map>
++
++#include "reconfiguration_detector.h"
++
++namespace webrtc {
++
++ReconfigurationDetector::ReconfigurationDetector() {
++  processing_thread_ = std::thread([this] {
++    while (!stop_processing_thread_) {
++      std::this_thread::sleep_for(std::chrono::seconds(5));
++      this->processing_mutex_.lock();
++      if (collected_enough_data_) {
++        update_detection_();
++      }
++      this->processing_mutex_.unlock();
++    }
++  });
++}
++
++ReconfigurationDetector::~ReconfigurationDetector() {
++  this->processing_mutex_.lock();
++  stop_processing_thread_ = true;
++  this->processing_mutex_.unlock();
++  if (processing_thread_.joinable()) {
++    processing_thread_.join();
++  }
++}
++
++void ReconfigurationDetector::update_delay_trend(float delay_trend) {
++  delay_trend_latest_index_++;
++  delay_trend_latest_index_ %= delay_trend_values_.size();
++  delay_trend_values_[delay_trend_latest_index_] = std::abs(delay_trend);
++  ticks_ago_last_peak_detected_++;
++  if (delay_trend < -0.02f) {
++    delay_trend_under_reconnect_threshold_++;
++  } else {
++    if (delay_trend >= 0.015f) {
++      ticks_ago_last_peak_detected_ = 0;
++    }
++    delay_trend_under_reconnect_threshold_ = 0;
++  }
++
++  // Collect at least a minute of data before predicting
++  if (!collected_enough_data_ && delay_trend_latest_index_ >= 40*60) {
++    this->processing_mutex_.lock();
++    collected_enough_data_ = true;
++    this->processing_mutex_.unlock();
++  }
++}
++
++void ReconfigurationDetector::update_detection_() {
++  std::cout << std::endl;
++  std::cout << "Running reconfiguration periodicy prediction." << std::endl;
++
++  if (past_detections_.size() > 20) {
++    past_detections_.erase(past_detections_.begin(), past_detections_.begin() + (past_detections_.size() - 20));
++  }
++
++  if (ticks_ago_last_peak_detected_ > 40*60*2) {
++    std::cout << "No peaks detected in the last 2 minutes, do not run detection algorithm." << std::endl;
++    DetectionResult result = { false, 0 };
++    past_detections_.emplace_back(result);
++    return;
++  }
++
++  const size_t buffer_size = delay_trend_values_.size();
++  const auto latest_index = delay_trend_latest_index_;
++  // Get a reference time here, since calculations will otherwise make it inaccurate
++  std::chrono::time_point<std::chrono::system_clock> next_peak_time = std::chrono::system_clock::now();
++
++  // Calculate mean directly from circular buffer
++  float sum = 0.0f;
++  for (size_t i = 0; i < buffer_size; ++i) {
++    sum += delay_trend_values_[i];
++  }
++  const float mean = sum / static_cast<float>(buffer_size);
++
++  // Calculate variance directly from circular buffer
++  float variance = 0.0f;
++  for (size_t i = 0; i < buffer_size; ++i) {
++    const float centered_value = delay_trend_values_[i] - mean;
++    variance += centered_value * centered_value;
++  }
++  variance /= static_cast<float>(buffer_size);
++
++  // Pre-calculate all correlations and store them for reuse
++  std::unordered_map<size_t, float> correlation_cache;
++
++  // Helper function to calculate correlation for a given lag
++  auto calculate_correlation = [&](size_t lag) -> float {
++    if (lag >= buffer_size) return 0.0f;
++
++    float correlation = 0.0f;
++    for (size_t i = 0; i < buffer_size - lag; ++i) {
++      // Read from circular buffer in chronological order
++      const size_t idx1 = (latest_index + 1 + i) % buffer_size;
++      const size_t idx2 = (latest_index + 1 + i + lag) % buffer_size;
++
++      const float val1 = delay_trend_values_[idx1] - mean;
++      const float val2 = delay_trend_values_[idx2] - mean;
++      correlation += val1 * val2;
++    }
++    return correlation / (static_cast<float>(buffer_size - lag) * variance);
++  };
++
++  // Helper function to get correlation (with caching)
++  auto get_correlation = [&](size_t lag) -> float {
++    auto it = correlation_cache.find(lag);
++    if (it != correlation_cache.end()) {
++      return it->second;
++    }
++    float correlation = calculate_correlation(lag);
++    correlation_cache[lag] = correlation;
++    return correlation;
++  };
++
++  // Store correlations for all lags
++  struct Peak {
++    int lag;
++    float correlation;
++  };
++  std::vector<Peak> peaks;
++
++  // Calculate autocorrelation for lags 400-3600 (10-90 seconds at 40Hz)
++  for (int lag = 400; lag <= 3600; ++lag) {
++    if (static_cast<size_t>(lag) >= buffer_size) break;
++
++    float correlation = get_correlation(static_cast<size_t>(lag));
++
++    // Keep significant correlations
++    if (correlation > 0.02f) {
++      peaks.push_back({lag, correlation});
++    }
++  }
++
++  if (peaks.empty()) {
++    std::cout << "  No significant periodic patterns found in 10-90 second range" << std::endl;
++    if (past_detections_.size() >= 3) {
++      std::vector recent_detections(past_detections_.end() - 3, past_detections_.end());
++      // if all negative, empty past detections
++      if (std::all_of(recent_detections.begin(), recent_detections.end(),
++                      [](const DetectionResult& res) { return !res.has_detected_period; })) {
++        past_detections_.clear();
++      }
++      else if (std::all_of(recent_detections.begin(), recent_detections.end(),
++                      [](const DetectionResult& res) { return res.has_detected_period; })) {
++        DetectionResult result = { false, 0 };
++        past_detections_.emplace_back(result);
++        auto const recent_average = get_recent_average(past_detections_);
++        std::cout << "Returning previous average: " << recent_average << "s" << std::endl;
++        latest_detection_mutex_.lock();
++        if (latest_detection_.has_value() && latest_detection_->expected_next_peak < next_peak_time) {
++          latest_detection_ = ReconfigurationDetection{
++            .period = recent_average,
++            .expected_next_peak = latest_detection_->expected_next_peak + std::chrono::milliseconds(static_cast<int>(recent_average * 1000))
++          };
++        }
++        latest_detection_mutex_.unlock();
++        return;
++      }
++    }
++
++    DetectionResult result = { false, 0 };
++    past_detections_.emplace_back(result);
++    return;
++  }
++
++  // Find strongest peak
++  const auto strongest = std::max_element(peaks.begin(), peaks.end(),
++    [](const Peak& a, const Peak& b) { return std::abs(a.correlation) < std::abs(b.correlation); });
++
++  const float strongest_period = static_cast<float>(strongest->lag) / 40.0f;
++
++  // Find harmonics of the strongest period
++  struct Harmonic {
++    float period;
++    float correlation;
++    float ratio;
++  };
++  std::vector<Harmonic> harmonics;
++
++  constexpr float harmonic_ratios[] = {0.125f, 0.25f, 0.5f, 2.0f, 3.0f};
++  for (const auto ratio : harmonic_ratios) {
++    const float harmonic_period = strongest_period * ratio;
++    if (harmonic_period >= 10.0f && harmonic_period <= 90.0f) {
++      const auto harmonic_lag = static_cast<size_t>(harmonic_period * 40.0f);
++      if (harmonic_lag < buffer_size) {
++        float correlation = get_correlation(harmonic_lag);
++        harmonics.push_back({harmonic_period, correlation, ratio});
++      }
++    }
++  }
++
++  // Select the best period: prefer smaller harmonics with correlation > 0.15
++  float best_period = strongest_period;
++  float best_correlation = strongest->correlation;
++
++  // Look for smaller harmonics with sufficient correlation (prefer the smallest one)
++  for (const auto& h : harmonics) {
++    if (h.ratio < 1.0f && std::abs(h.correlation) > 0.15f) {
++      if (h.period < best_period) {
++        best_period = h.period;
++        best_correlation = h.correlation;
++      }
++    }
++  }
++
++  // If no qualifying smaller harmonic found, pick the period with highest absolute correlation
++  if (best_period == strongest_period) {
++    for (const auto& h : harmonics) {
++      if (std::abs(h.correlation) > std::abs(best_correlation)) {
++        best_period = h.period;
++        best_correlation = h.correlation;
++      }
++    }
++  }
++
++  std::cout << "Detected periodicity: " << best_period << "s, correlation = " << best_correlation << std::endl;
++  auto const recent_avg = get_recent_average(past_detections_);
++  std::cout << "Recent average of past detections: " << recent_avg << "s" << std::endl;
++
++  // Check if recent average is close to 1/2, 1/3, 1/4 or 1/5 of the detected period, if you divide the detected period
++  constexpr float dividers[] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
++  bool new_detection_is_similar_to_previous = false;
++  float new_detection_divider = 0.0f;
++  if (recent_avg != 0.0f) {
++    for (const auto divider : dividers) {
++      if (std::abs(recent_avg - best_period / divider) < 1.0f) {
++        new_detection_is_similar_to_previous = true;
++        new_detection_divider = divider;
++        break;
++      }
++    }
++  }
++
++  if (!new_detection_is_similar_to_previous) {
++    std::cout << "New period not close to previous detections, adding and waiting for future similar detections." << std::endl;
++    DetectionResult result = { true, best_period };
++    past_detections_.emplace_back(result);
++    latest_detection_mutex_.lock();
++    latest_detection_ = std::nullopt;
++    latest_detection_mutex_.unlock();
++    return;
++  }
++
++  best_period = best_period / new_detection_divider;
++  std::cout << "New period is similar to previous detections, adjusting to " << best_period << "s." << std::endl;
++  DetectionResult result = { true, best_period, new_detection_divider != 1.0f };
++  past_detections_.emplace_back(result);
++
++  auto const returning_avg = get_recent_average(past_detections_);
++  std::cout << "Returning average: " << returning_avg << "s" << std::endl;
++
++  if (returning_avg == 0.0f) {
++    std::cout << "Returned average was 0, peak detection reset due to interval change." << std::endl;
++    latest_detection_mutex_.lock();
++    latest_detection_ = std::nullopt;
++    latest_detection_mutex_.unlock();
++    return;
++  }
++
++  auto interval_samples = static_cast<size_t>(std::round(returning_avg * 40.0f));
++  auto num_lookback = delay_trend_values_.size() / interval_samples;
++  double max_lookback_value = 0.0f;
++  auto max_lookback_sample_count = 0;
++  for (auto i = 0; i < interval_samples; i++) {
++    auto val = 0.0;
++    for (auto j = 0; j < num_lookback; j++) {
++      val += delay_trend_values_[(latest_index - i - (j * interval_samples) + delay_trend_values_.size()) % delay_trend_values_.size()];
++    }
++    if (val > max_lookback_value) {
++      max_lookback_value = val;
++      max_lookback_sample_count = i;
++    }
++  }
++
++  std::cout << "Max lookback value: " << max_lookback_value << " at sample count: " << max_lookback_sample_count << std::endl;
++  if (max_lookback_value < 0.04f) {
++    std::cout << "Detected interval peaks below threshold, not using detected interval." << std::endl;
++    latest_detection_mutex_.lock();
++    latest_detection_ = std::nullopt;
++    latest_detection_mutex_.unlock();
++    return;
++  }
++
++  auto expected_next_peak_index = (latest_index - max_lookback_sample_count + interval_samples) % delay_trend_values_.size();
++  std::cout << "Found last interval peak " << max_lookback_sample_count << " samples ago. Expecting next interval at sample " << expected_next_peak_index << std::endl;
++  next_peak_time = next_peak_time + std::chrono::seconds((interval_samples - max_lookback_sample_count) / 40);
++  std::cout << "Expecting next peak in " << (interval_samples - max_lookback_sample_count) *25 << "ms." << std::endl;
++
++  latest_detection_mutex_.lock();
++  latest_detection_ = ReconfigurationDetection{
++    .period = returning_avg,
++    .expected_next_peak = next_peak_time
++  };
++  latest_detection_mutex_.unlock();
++}
++
++bool ReconfigurationDetector::is_in_reconfiguration() {
++  if (is_in_reconfiguration_state_) {
++    if (reconfiguration_ticks_left_ == 0) {
++      std::cout << "Reconfiguration state ended." << std::endl;
++      is_in_reconfiguration_state_ = false;
++    } else if (delay_trend_values_[delay_trend_latest_index_] < 0.02f) {
++      reconfiguration_ticks_left_--;
++    } else if (delay_trend_under_reconnect_threshold_ >= 2) {
++      reconfiguration_ticks_left_ = 0;
++    }
++  } else {
++    // Switch to reconfiguration state if we have a detected peak coming up
++    latest_detection_mutex_.lock();
++    if (latest_detection_.has_value()) {
++      auto const& detection = latest_detection_.value();
++      auto now = std::chrono::system_clock::now();
++      // Peak within the next 300ms
++      if (detection.expected_next_peak <= now + std::chrono::milliseconds(300) && detection.expected_next_peak >= now - std::chrono::milliseconds(100)) {
++        is_in_reconfiguration_state_ = true;
++        reconfiguration_ticks_left_ = 40; // 1 second
++        std::cout << "Switching to reconfiguration state for " << reconfiguration_ticks_left_ << " ticks." << std::endl;
++      }
++    }
++    latest_detection_mutex_.unlock();
++  }
++
++  return is_in_reconfiguration_state_;
++}
++
++float get_recent_average(const std::vector<DetectionResult>& detections) {
++  // Iterate from the back of the vector and average over all recent detections until one is found that is not within a second of the others
++  if (detections.empty()) return 0.0f;
++  float sum = 0.0f;
++  size_t count = 0;
++  size_t was_adjusted_count = 0;
++
++  for (auto it = detections.rbegin(); it != detections.rend(); ++it) {
++    if (it->has_detected_period) {
++      if (it->period - sum / count > 1.0f && count > 0) {
++        break;
++      }
++      sum += it->period;
++      count++;
++      if (it->was_adjusted) {
++        was_adjusted_count++;
++        if (was_adjusted_count >= 5) {
++          // Last 3 detections were adjusted, reset detection
++          return 0.0f;
++        }
++      } else {
++        was_adjusted_count = 0; // Reset if we find a non-adjusted detection
++      }
++    }
++  }
++
++  return count > 0 ? sum / static_cast<float>(count) : 0.0f;
++}
++
++} // webrtc
+\ No newline at end of file
+diff --git a/modules/congestion_controller/goog_cc/reconfiguration_detector.h b/modules/congestion_controller/goog_cc/reconfiguration_detector.h
+new file mode 100644
+index 0000000000..0df5a44527
+--- /dev/null
++++ b/modules/congestion_controller/goog_cc/reconfiguration_detector.h
+@@ -0,0 +1,54 @@
++//
++// Created by yannis on 7/5/25.
++//
++#ifndef MODULES_CONGESTION_CONTROLLER_GOOG_CC_RECONFIGURATION_DETECTOR_H_
++#define MODULES_CONGESTION_CONTROLLER_GOOG_CC_RECONFIGURATION_DETECTOR_H_
++
++#include <chrono>
++#include <array>
++#include <mutex>
++#include <optional>
++#include <thread>
++
++namespace webrtc {
++struct DetectionResult {
++  bool has_detected_period = false;
++  float period = 0;
++  bool was_adjusted = false;
++};
++
++struct ReconfigurationDetection {
++  float period = 0;
++  std::chrono::time_point<std::chrono::system_clock> expected_next_peak;
++};
++
++float get_recent_average(const std::vector<DetectionResult>& detections);
++
++class ReconfigurationDetector {
++public:
++  ReconfigurationDetector();
++  ~ReconfigurationDetector();
++  void update_delay_trend(float trend_value);
++  bool is_in_reconfiguration();
++private:
++  void update_detection_();
++private:
++  std::array<float, 9600> delay_trend_values_ = {};
++  unsigned int delay_trend_under_reconnect_threshold_ = 0;
++  bool collected_enough_data_ = false;
++  size_t delay_trend_latest_index_ = 0;
++  size_t ticks_ago_last_peak_detected_ = 9600;
++  std::vector<DetectionResult> past_detections_ = {};
++  std::thread processing_thread_;
++  std::mutex processing_mutex_;
++  bool stop_processing_thread_ = false;
++
++  std::mutex latest_detection_mutex_;
++  std::optional<ReconfigurationDetection> latest_detection_;
++
++  bool is_in_reconfiguration_state_ = false;
++  size_t reconfiguration_ticks_left_ = 0;
++};
++} // webrtc
++
++#endif // MODULES_CONGESTION_CONTROLLER_GOOG_CC_RECONFIGURATION_DETECTOR_H_
+\ No newline at end of file
+diff --git a/modules/congestion_controller/goog_cc/starlink_reconfiguration_guard.cc b/modules/congestion_controller/goog_cc/starlink_reconfiguration_guard.cc
+new file mode 100644
+index 0000000000..0db8591614
+--- /dev/null
++++ b/modules/congestion_controller/goog_cc/starlink_reconfiguration_guard.cc
+@@ -0,0 +1,113 @@
++//
++// Created by yannis on 8/30/25.
++//
++
++#include "starlink_reconfiguration_guard.h"
++#include "api/safe_ostream.h"
++#include "api/units/timestamp.h"
++#include "api/units/time_delta.h"
++#include "api/units/data_rate.h"
++#include "rtc_base/logging.h"
++#include <iostream>
++
++namespace webrtc {
++void StarlinkReconfigurationGuard::OnFeedback(TimeDelta since_last_feedback, DataRate acked_bitrate, Timestamp now) {
++  // Detect a hole: a sudden feedback gap with near-zero delivery.
++  std::ostringstream stats_output;
++  stats_output << "SIGNAL/GUARD/" << since_last_feedback.ms() << ";";
++  if (cfg_.enabled) {
++    switch (state_) {
++      case GuardState::kNormal:
++        stats_output << "normal";
++        break;
++      case GuardState::kDetectedFeedbackGap:
++        stats_output << "detected_feedback_gap";
++        break;
++      case GuardState::kConfirmedGap:
++        stats_output << "confirmed_gap";
++        break;
++    }
++  } else {
++    stats_output << "disabled";
++  }
++
++  stats_output << std::endl;
++  webrtc::safe_cout() << stats_output.str();
++
++  if (!cfg_.enabled) {
++    return;
++  }
++
++  if (state_ == GuardState::kDetectedFeedbackGap && now >= awaiting_confirmation_until_) {
++    state_ = GuardState::kNormal;
++    webrtc::safe_cout() << "Starlink Reconfiguration Guard: Gap was not confirmed by increased delay in feedback.\n";
++    return;
++  }
++  if (state_ == GuardState::kConfirmedGap && now >= max_confirmed_state_until_) {
++    state_ = GuardState::kNormal;
++    webrtc::safe_cout() << "Starlink Reconfiguration Guard: Gap ended after max time. This should never happen!\n";
++    cooldown_until_ = Timestamp::MinusInfinity();
++    reprobe_next_interval_ = true;
++    return;
++  }
++  if (state_ != GuardState::kNormal) {
++    return;
++  }
++  if (since_last_feedback >= cfg_.feedback_gap_trigger) {
++    if (now < cooldown_until_) {
++      webrtc::safe_cout() << "Starlink Reconfiguration Guard: Ignoring hole since guard has engaged recently.\n";
++      return;
++    }
++    state_ = GuardState::kDetectedFeedbackGap;
++    awaiting_confirmation_until_ = now + cfg_.gap_confirm_timer;
++    std::stringstream out;
++    out << "Starlink Reconfiguration Guard detected feedback gap at " << now.ms() << " ms" << std::endl;
++    webrtc::safe_cout() << out.str();
++  }
++}
++
++void StarlinkReconfigurationGuard::UpdateCurrentFeedbackTime(Timestamp now) {
++  current_feedback_time_ = now;
++}
++
++bool StarlinkReconfigurationGuard::IgnoreSampleWithDelay(double recv_delta_ms, double send_delta_ms, int64_t arrival_time_ms) {
++  if (!cfg_.enabled) {
++    return false;
++  }
++  if (state_ == GuardState::kNormal) {
++    return false;
++  }
++  if (state_ == GuardState::kConfirmedGap) {
++    double delay_increase_ms = recv_delta_ms - send_delta_ms;
++    if (delay_increase_ms < 0) {
++      std::stringstream out;
++      out << "Starlink Reconfiguration Guard: Negative delay increase: " << delay_increase_ms << " ms\n";
++      webrtc::safe_cout() << out.str();
++      state_ = GuardState::kNormal;
++      cooldown_until_ = current_feedback_time_ + cfg_.min_gap_cooldown;
++      reprobe_next_interval_ = true;
++    }
++    return true;
++  }
++  if (state_ == GuardState::kDetectedFeedbackGap) {
++    double delay_increase_ms = recv_delta_ms - send_delta_ms;
++    if (delay_increase_ms >= cfg_.gap_delay_threshold) {
++      std::stringstream out;
++      out << "Starlink Reconfiguration Guard: Confirmed gap with delay increase of " << delay_increase_ms << " ms at " << current_feedback_time_.ms() << " ms\n";
++      webrtc::safe_cout() << out.str();
++      max_confirmed_state_until_ = current_feedback_time_ + cfg_.max_gap_pause;
++      state_ = GuardState::kConfirmedGap;
++    }
++  }
++  return state_ == GuardState::kConfirmedGap;
++}
++
++bool StarlinkReconfigurationGuard::JustFinishedReconfig() {
++  if (reprobe_next_interval_) {
++    reprobe_next_interval_ = false;
++    return true;
++  }
++  return false;
++}
++
++} // namespace webrtc
+\ No newline at end of file
+diff --git a/modules/congestion_controller/goog_cc/starlink_reconfiguration_guard.h b/modules/congestion_controller/goog_cc/starlink_reconfiguration_guard.h
+new file mode 100644
+index 0000000000..bd20e32e4c
+--- /dev/null
++++ b/modules/congestion_controller/goog_cc/starlink_reconfiguration_guard.h
+@@ -0,0 +1,51 @@
++//
++// Created by yannis on 8/30/25.
++//
++
++#ifndef WEBRTC_CHECKOUT_STARLINK_RECONFIGURATION_GUARD_H
++#define WEBRTC_CHECKOUT_STARLINK_RECONFIGURATION_GUARD_H
++
++#include "api/units/timestamp.h"
++#include "api/units/time_delta.h"
++#include "api/units/data_rate.h"
++
++namespace webrtc {
++
++enum GuardState {
++  kNormal,
++  kDetectedFeedbackGap,
++  kConfirmedGap
++};
++
++struct StarlinkGuardConfig {
++  bool enabled = true;
++  TimeDelta feedback_gap_trigger = TimeDelta::Millis(72);   // treat >=72ms as candidate outage
++  TimeDelta gap_confirm_timer = TimeDelta::Millis(800);     // confirm gap with increased delay in feedback within the next 800ms
++  TimeDelta max_gap_pause = TimeDelta::Millis(800);         // max time to stay in confirmed gap state (ms)
++  uint32_t gap_delay_threshold = 60;                        // threshold for increased delay to confirm gap (ms)
++  TimeDelta min_gap_cooldown = TimeDelta::Seconds(10);       // min interval between triggering
++};
++
++class StarlinkReconfigurationGuard {
++public:
++  explicit StarlinkReconfigurationGuard(const StarlinkGuardConfig &config) : cfg_(config) {}
++
++  void OnFeedback(TimeDelta since_last_feedback, DataRate acked_bitrate, Timestamp now);
++  void UpdateCurrentFeedbackTime(Timestamp now);
++  bool IgnoreSampleWithDelay(double recv_delta_ms, double send_delta_ms, int64_t arrival_time_ms);
++  bool JustFinishedReconfig();
++
++private:
++  StarlinkGuardConfig cfg_;
++  GuardState state_ = kNormal;
++  bool reprobe_next_interval_ = false;
++  Timestamp cooldown_until_ = Timestamp::MinusInfinity();
++  Timestamp awaiting_confirmation_until_ = Timestamp::MinusInfinity();
++  Timestamp max_confirmed_state_until_ = Timestamp::MinusInfinity();
++
++  Timestamp current_feedback_time_ = Timestamp::MinusInfinity();
++};
++
++}
++
++#endif  // WEBRTC_CHECKOUT_STARLINK_RECONFIGURATION_GUARD_H
+diff --git a/modules/congestion_controller/goog_cc/trendline_estimator.cc b/modules/congestion_controller/goog_cc/trendline_estimator.cc
+index 09796347e9..0a877197ed 100644
+--- a/modules/congestion_controller/goog_cc/trendline_estimator.cc
++++ b/modules/congestion_controller/goog_cc/trendline_estimator.cc
+@@ -169,6 +169,7 @@ TrendlineEstimator::TrendlineEstimator(
+       first_arrival_time_ms_(-1),
+       accumulated_delay_(0),
+       smoothed_delay_(0),
++      latest_delta_ms_(0),
+       delay_hist_(),
+       k_up_(0.0087),
+       k_down_(0.039),
+@@ -197,6 +198,7 @@ void TrendlineEstimator::UpdateTrendline(double recv_delta_ms,
+                                          int64_t arrival_time_ms,
+                                          size_t /* packet_size */) {
+   const double delta_ms = recv_delta_ms - send_delta_ms;
++  latest_delta_ms_ = delta_ms;
+   ++num_of_deltas_;
+   num_of_deltas_ = std::min(num_of_deltas_, kDeltaCounterMax);
+   if (first_arrival_time_ms_ == -1)
+@@ -244,6 +246,16 @@ void TrendlineEstimator::UpdateTrendline(double recv_delta_ms,
+   Detect(trend, send_delta_ms, arrival_time_ms);
+ }
+ 
++void TrendlineEstimator::NotifyFeedbackWindow(int64_t since_last_feedback_ms,
++                                              double acked_bitrate_bps,
++                                              int64_t now_ms) {
++  if (!starlink_guard_) return;
++  starlink_guard_->OnFeedback(TimeDelta::Millis(since_last_feedback_ms),
++                              DataRate::BitsPerSec(acked_bitrate_bps),
++                              Timestamp::Millis(now_ms));
++  starlink_guard_->UpdateCurrentFeedbackTime(Timestamp::Millis(now_ms));
++}
++
+ void TrendlineEstimator::Update(double recv_delta_ms,
+                                 double send_delta_ms,
+                                 int64_t send_time_ms,
+@@ -251,6 +263,9 @@ void TrendlineEstimator::Update(double recv_delta_ms,
+                                 size_t packet_size,
+                                 bool calculated_deltas) {
+   if (calculated_deltas) {
++    if (starlink_guard_ && starlink_guard_->IgnoreSampleWithDelay(recv_delta_ms, send_delta_ms, arrival_time_ms)) {
++      return;
++    }
+     UpdateTrendline(recv_delta_ms, send_delta_ms, send_time_ms, arrival_time_ms,
+                     packet_size);
+   }
+@@ -323,4 +338,17 @@ void TrendlineEstimator::UpdateThreshold(double modified_trend,
+   last_update_ms_ = now_ms;
+ }
+ 
++// trendline_estimator.cc
++double TrendlineEstimator::GetLastRawDelay() const {
++  return latest_delta_ms_;
++}
++
++double TrendlineEstimator::GetTrendlineValue() const {
++  return prev_trend_;
++}
++
++double TrendlineEstimator::GetThreshold() const {
++  return threshold_;
++}
++
+ }  // namespace webrtc
+diff --git a/modules/congestion_controller/goog_cc/trendline_estimator.h b/modules/congestion_controller/goog_cc/trendline_estimator.h
+index 5fc55acaca..b7574dace8 100644
+--- a/modules/congestion_controller/goog_cc/trendline_estimator.h
++++ b/modules/congestion_controller/goog_cc/trendline_estimator.h
+@@ -20,7 +20,9 @@
+ #include "api/network_state_predictor.h"
+ #include "api/transport/bandwidth_usage.h"
+ #include "modules/congestion_controller/goog_cc/delay_increase_detector_interface.h"
++#include "modules/congestion_controller/goog_cc/starlink_reconfiguration_guard.h"
+ #include "rtc_base/experiments/struct_parameters_parser.h"
++#include "rtc_base/logging.h"
+ 
+ namespace webrtc {
+ 
+@@ -58,6 +60,10 @@ class TrendlineEstimator : public DelayIncreaseDetectorInterface {
+   TrendlineEstimator(const TrendlineEstimator&) = delete;
+   TrendlineEstimator& operator=(const TrendlineEstimator&) = delete;
+ 
++  void NotifyFeedbackWindow(int64_t since_last_feedback_ms,
++                              double acked_bitrate_bps,
++                              int64_t now_ms) override;
++
+   // Update the estimator with a new sample. The deltas should represent deltas
+   // between timestamp groups as defined by the InterArrival class.
+   void Update(double recv_delta_ms,
+@@ -75,6 +81,19 @@ class TrendlineEstimator : public DelayIncreaseDetectorInterface {
+ 
+   BandwidthUsage State() const override;
+ 
++  double GetLastRawDelay() const override;
++  double GetTrendlineValue() const override;
++  double GetThreshold() const override;
++
++  void SetStarlinkGuard(std::shared_ptr<StarlinkReconfigurationGuard> guard) override {
++    starlink_guard_ = std::move(guard);
++    RTC_LOG(LS_INFO) << "TrendlineEstimator: Starlink guard set.";
++  }
++
++  bool HasStarlinkGuard() override {
++    return starlink_guard_ != nullptr;
++  }
++
+   struct PacketTiming {
+     PacketTiming(double arrival_time_ms,
+                  double smoothed_delay_ms,
+@@ -104,6 +123,7 @@ class TrendlineEstimator : public DelayIncreaseDetectorInterface {
+   // Exponential backoff filtering.
+   double accumulated_delay_;
+   double smoothed_delay_;
++  double latest_delta_ms_;
+   // Linear least squares regression.
+   std::deque<PacketTiming> delay_hist_;
+ 
+@@ -119,6 +139,7 @@ class TrendlineEstimator : public DelayIncreaseDetectorInterface {
+   BandwidthUsage hypothesis_;
+   BandwidthUsage hypothesis_predicted_;
+   NetworkStatePredictor* network_state_predictor_;
++  std::shared_ptr<StarlinkReconfigurationGuard> starlink_guard_;
+ };
+ }  // namespace webrtc
+ 
+diff --git a/modules/video_coding/fec_controller_default.cc b/modules/video_coding/fec_controller_default.cc
+index 6ca9724439..164aabe0d5 100644
+--- a/modules/video_coding/fec_controller_default.cc
++++ b/modules/video_coding/fec_controller_default.cc
+@@ -37,10 +37,16 @@ FecControllerDefault::FecControllerDefault(
+       protection_callback_(protection_callback),
+       loss_prot_logic_(new media_optimization::VCMLossProtectionLogic(env_)),
+       max_payload_size_(1460),
+-      overhead_threshold_(GetProtectionOverheadRateThreshold()) {}
++      overhead_threshold_(GetProtectionOverheadRateThreshold()),
++      burst_fec_enabled_(GetBurstFecEnabled()),
++      burst_fec_static_overhead_(GetBurstFecStaticOverhead()) {}
+ 
+ FecControllerDefault::FecControllerDefault(const Environment& env)
+-    : FecControllerDefault(env, nullptr) {}
++    : FecControllerDefault(env, nullptr) {
++      RTC_LOG(LS_INFO) << "FEC Controller created.";
++      RTC_LOG(LS_INFO) << "Burst FEC enabled: "
++                       << (burst_fec_enabled_ ? "true" : "false");
++    }
+ 
+ FecControllerDefault::~FecControllerDefault(void) {
+   loss_prot_logic_->Release();
+@@ -64,7 +70,7 @@ void FecControllerDefault::SetEncodingData(size_t width,
+ float FecControllerDefault::GetProtectionOverheadRateThreshold() {
+   float overhead_threshold =
+       strtof(env_.field_trials()
+-                 .Lookup("WebRTC-ProtectionOverheadRateThreshold")
++                 .Lookup("ProtectionOverheadRateThreshold")
+                  .c_str(),
+              nullptr);
+   if (overhead_threshold > 0 && overhead_threshold <= 1) {
+@@ -76,11 +82,35 @@ float FecControllerDefault::GetProtectionOverheadRateThreshold() {
+         << "ProtectionOverheadRateThreshold field trial is set to "
+            "an invalid value, expecting a value between (0, 1].";
+   }
+-  // WebRTC-ProtectionOverheadRateThreshold field trial string is not found, use
++  // ProtectionOverheadRateThreshold field trial string is not found, use
+   // the default value.
+   return kProtectionOverheadRateThreshold;
+ }
+ 
++bool FecControllerDefault::GetBurstFecEnabled() {
++  return env_.field_trials().IsEnabled("BurstFecEnabled");
++}
++
++float FecControllerDefault::GetBurstFecStaticOverhead() {
++  float static_overhead =
++      strtof(env_.field_trials()
++                 .Lookup("BurstFecStaticOverhead")
++                 .c_str(),
++             nullptr);
++  if (static_overhead > 0 && static_overhead <= 50) {
++    RTC_LOG(LS_INFO) << "BurstFecStaticOverhead is set to "
++                     << static_overhead << "%";
++    return static_overhead / 100.0f;  // Convert percentage to ratio
++  } else if (static_overhead < 0 || static_overhead > 50) {
++    RTC_LOG(LS_WARNING)
++        << "BurstFecStaticOverhead field trial is set to "
++           "an invalid value, expecting a value between (0, 50].";
++  }
++  // BurstFecStaticOverhead field trial string is not found, use 0
++  // (disabled).
++  return 0.0f;
++}
++
+ uint32_t FecControllerDefault::UpdateFecRates(
+     uint32_t estimated_bitrate_bps,
+     int actual_framerate_fps,
+@@ -97,6 +127,7 @@ uint32_t FecControllerDefault::UpdateFecRates(
+   FecProtectionParams key_fec_params;
+   {
+     MutexLock lock(&mutex_);
++    // TODO: Update FEC protection logic here
+     loss_prot_logic_->UpdateBitRate(target_bitrate_kbps);
+     loss_prot_logic_->UpdateRtt(round_trip_time_ms);
+     // Update frame rate for the loss protection logic class: frame rate should
+@@ -139,8 +170,14 @@ uint32_t FecControllerDefault::UpdateFecRates(
+   // consecutive losses and little/no packet re-ordering. As we currently
+   // do not have feedback data on the degree of correlated losses and packet
+   // re-ordering, we keep default setting to `kFecMaskRandom` for now.
+-  delta_fec_params.fec_mask_type = kFecMaskRandom;
+-  key_fec_params.fec_mask_type = kFecMaskRandom;
++  // However, this can be overridden via the BurstFecEnabled field trial.
++  if (burst_fec_enabled_) {
++    delta_fec_params.fec_mask_type = kFecMaskBursty;
++    key_fec_params.fec_mask_type = kFecMaskBursty;
++  } else {
++    delta_fec_params.fec_mask_type = kFecMaskRandom;
++    key_fec_params.fec_mask_type = kFecMaskRandom;
++  }
+   // Update protection callback with protection settings.
+   uint32_t sent_video_rate_bps = 0;
+   uint32_t sent_nack_rate_bps = 0;
+@@ -160,6 +197,13 @@ uint32_t FecControllerDefault::UpdateFecRates(
+         static_cast<float>(sent_nack_rate_bps + sent_fec_rate_bps) /
+         sent_total_rate_bps;
+   }
++  // If burst FEC is enabled with a static overhead, use that instead of the
++  // dynamic overhead calculation.
++  if (burst_fec_enabled_ && burst_fec_static_overhead_ > 0.0f) {
++    protection_overhead_rate = burst_fec_static_overhead_;
++    RTC_LOG(LS_VERBOSE) << "Using static FEC overhead: "
++                        << (protection_overhead_rate * 100.0f) << "%";
++  }
+   // Cap the overhead estimate to a threshold, default is 50%.
+   protection_overhead_rate =
+       std::min(protection_overhead_rate, overhead_threshold_);
+diff --git a/modules/video_coding/fec_controller_default.h b/modules/video_coding/fec_controller_default.h
+index c4b7044d9b..63e238fb67 100644
+--- a/modules/video_coding/fec_controller_default.h
++++ b/modules/video_coding/fec_controller_default.h
+@@ -55,6 +55,9 @@ class FecControllerDefault : public FecController {
+   float GetProtectionOverheadRateThreshold();
+ 
+  private:
++  bool GetBurstFecEnabled();
++  float GetBurstFecStaticOverhead();
++
+   enum { kBitrateAverageWinMs = 1000 };
+   const Environment env_;
+   VCMProtectionCallback* protection_callback_;
+@@ -64,6 +67,8 @@ class FecControllerDefault : public FecController {
+   size_t max_payload_size_ RTC_GUARDED_BY(mutex_);
+ 
+   const float overhead_threshold_;
++  const bool burst_fec_enabled_;
++  const float burst_fec_static_overhead_;
+ };
+ 
+ }  // namespace webrtc
+diff --git a/rtc_base/synchronization/sequence_checker_internal.h b/rtc_base/synchronization/sequence_checker_internal.h
+index 19370706ff..8d10414c24 100644
+--- a/rtc_base/synchronization/sequence_checker_internal.h
++++ b/rtc_base/synchronization/sequence_checker_internal.h
+@@ -71,7 +71,8 @@ std::enable_if_t<std::is_base_of_v<SequenceCheckerImpl, ThreadLikeObject>,
+                  std::string>
+ ExpectationToString([[maybe_unused]] const ThreadLikeObject* checker) {
+ #if RTC_DCHECK_IS_ON
+-  return checker->ExpectationToString();
++  return std::string();
++  // return checker->ExpectationToString(); not working!
+ #else
+   return std::string();
+ #endif
+diff --git a/webrtc.gni b/webrtc.gni
+index ac905cea7c..d17b7ceff1 100644
+--- a/webrtc.gni
++++ b/webrtc.gni
+@@ -113,7 +113,7 @@ declare_args() {
+   apm_debug_dump = false
+ 
+   # Selects whether the audio processing module should be excluded.
+-  rtc_exclude_audio_processing_module = false
++  rtc_exclude_audio_processing_module = true
+ 
+   # Set this to false to skip building examples.
+   rtc_build_examples = true
+@@ -282,7 +282,7 @@ declare_args() {
+   rtc_build_ssl = !build_with_mozilla
+ 
+   # Excluded in Chromium since its prerequisites don't require Pulse Audio.
+-  rtc_include_pulse_audio = !build_with_chromium
++  rtc_include_pulse_audio = false
+ 
+   # Chromium uses its own IO handling, so the internal ADM is only built for
+   # standalone WebRTC.
