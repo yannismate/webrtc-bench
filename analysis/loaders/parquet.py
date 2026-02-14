@@ -140,7 +140,10 @@ class ParquetData:
     def get_freeze_times(self) -> pd.Series | None:
         if "InboundRTP.FreezeCount" not in self.data:
             return None
-        freezes = self.data["InboundRTP.FreezeCount"].diff().fillna(0)
+        freeze_series = pd.to_numeric(self.data["InboundRTP.FreezeCount"], errors="coerce")
+        if freeze_series.dropna().empty:
+            return None
+        freezes = freeze_series.ffill().fillna(0).diff().fillna(0).clip(lower=0)
         freeze_times = freezes[freezes > 0]
         freeze_times.index.name = 'Timestamp'
         freeze_times.name = "freeze_count"

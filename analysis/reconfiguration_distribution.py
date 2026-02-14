@@ -23,7 +23,7 @@ def load_reconfig_times(folder_path: str) -> list[tuple[str, pd.Timestamp]]:
                 ms.load_files(only=['dishy'])
 
                 # Get reconfiguration times from the measurement
-                times = ms.get_reconfiguration_times()
+                times = ms.get_handover_times()
                 if times is not None:
                     reconfig_times.extend(times)
             except Exception as e:
@@ -50,7 +50,7 @@ def main():
     seconds = []
     for item in reconfig_times:
         if isinstance(item, tuple):
-            # (source, timestamp) format from get_reconfiguration_times()
+            # (source, timestamp) format from get_handover_times()
             ts = item[1]
         else:
             ts = item

@@ -41,7 +41,7 @@ def gather_measurement(folder: str, resample_ms: int, reconfig_window: bool = Fa
         if m.data_dishy_sender is None and m.data_dishy_receiver is None:
             raise ValueError(f"{folder}: --reconfig-window requires Dishy data; skipping measurement.")
         window_delta = pd.Timedelta(seconds=window_seconds)
-        reconfig_times = m.get_reconfiguration_times()
+        reconfig_times = m.get_handover_times()
         reconfig_windows = [(ts - window_delta, ts + window_delta) for _, ts in reconfig_times]
         if not reconfig_windows:
             print(f"Warning: {folder} has --reconfig-window enabled but no reconfiguration events were detected.")

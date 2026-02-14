@@ -83,7 +83,7 @@ def analyze_folder(folder_path: str, drop_threshold: float, window_seconds: floa
 
                 # Get receive bitrate and reconfiguration times
                 recv_br = ms.get_recv_bitrate_kbps()
-                reconfig_times = ms.get_reconfiguration_times()
+                reconfig_times = ms.get_handover_times()
 
                 # Find major drop
                 drop_time = find_major_bitrate_drop(

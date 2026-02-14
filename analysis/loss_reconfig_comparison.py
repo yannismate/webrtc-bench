@@ -59,7 +59,7 @@ def build_reconfig_windows(measurement: Measurement, window_seconds: float) -> L
     if measurement.data_dishy_sender is None and measurement.data_dishy_receiver is None:
         return []
     delta = pd.Timedelta(seconds=window_seconds)
-    return [(ts - delta, ts + delta) for _, ts in measurement.get_reconfiguration_times()]
+    return [(ts - delta, ts + delta) for _, ts in measurement.get_handover_times()]
 
 
 def filter_df_by_windows(df: pd.DataFrame, windows: List[Tuple[pd.Timestamp, pd.Timestamp]]) -> pd.DataFrame:

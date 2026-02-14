@@ -59,7 +59,7 @@ def collect_measurement_stats(root_path: str) -> list[MeasurementStats]:
                 print(f"Skipping {measurement_path}: unable to determine Dishy duration")
                 continue
 
-            reconfig_times = ms.get_reconfiguration_times() or []
+            reconfig_times = ms.get_handover_times() or []
             stats.append(
                 MeasurementStats(
                     name=ms.name,

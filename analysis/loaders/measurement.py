@@ -201,7 +201,7 @@ class Measurement:
 
         return min_timestamp, max_timestamp
 
-    def get_reconfiguration_times(self) -> list[tuple[str, pd.Timestamp]]:
+    def get_handover_times(self) -> list[tuple[str, pd.Timestamp]]:
         reconfig_times = []
         min_ts, max_ts = self.get_timestamp_range()
 

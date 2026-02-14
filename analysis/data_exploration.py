@@ -71,7 +71,7 @@ def main():
     rtt_webrtc = ms.get_parquet_rtt_ms()
     rtt_irtt = ms.get_irtt_rtt_ms()
     jitter = ms.get_jitter_ms()
-    reconfig_times = ms.get_reconfiguration_times()
+    reconfig_times = ms.get_handover_times()
     cong_br = ms.get_congestion_bitrates()
     delay_estimate = ms.get_delay_estimate_ms()
     feedback_interval = ms.get_feedback_interval_ms()
