@@ -2,13 +2,14 @@ package util
 
 import (
 	"context"
+	"os"
+	"runtime/debug"
+	"time"
+
 	"github.com/chromedp/cdproto/browser"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/chromedp"
 	"github.com/rs/zerolog/log"
-	"os"
-	"runtime/debug"
-	"time"
 )
 
 const (
@@ -51,10 +52,11 @@ func GetPionTestMetadata(publicIP string) TestMetadata {
 func GetChromeTestMetadata(publicIP string, isCustomVersion bool) TestMetadata {
 	hostName, _ := os.Hostname()
 
-	opts := append(chromedp.DefaultExecAllocatorOptions[:])
+	headlessShellPath := "/usr/bin/chromium-headless-shell"
 	if isCustomVersion {
-		opts = append(opts, chromedp.ExecPath("bin/headless_shell/headless_shell"))
+		headlessShellPath = "bin/headless_shell/headless_shell"
 	}
+	opts := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(headlessShellPath))
 	parentCtx, parentCtxCancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer parentCtxCancel()
 

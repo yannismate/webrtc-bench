@@ -7,22 +7,24 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"github.com/chromedp/cdproto/browser"
+	"io"
+	"os"
+	"os/exec"
+	"path"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+	"webrtc-bench/internal/cases/stats"
+	"webrtc-bench/internal/results"
+	"webrtc-bench/internal/util"
+
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/webauthn"
 	"github.com/chromedp/chromedp/kb"
-	"io"
-	"os"
-	"path"
-	"path/filepath"
-	"strconv"
-	"strings"
-	"time"
-	"webrtc-bench/internal/cases/stats"
-	"webrtc-bench/internal/results"
-	"webrtc-bench/internal/util"
 
 	"github.com/chromedp/chromedp"
 	"github.com/rs/zerolog/log"
@@ -100,7 +102,7 @@ func (c *CaseVideoTeams) Configure(config PeerCaseConfig, sendSignal func(signal
 		headless = false
 	}
 
-	headlessShellPath := "chromium-headless-shell"
+	headlessShellPath := "/usr/bin/chromium-headless-shell"
 	if val, ok := config.AdditionalConfig["use_custom_chromium"]; ok && val == "true" {
 		headlessShellPath = "bin/headless_shell/headless_shell"
 	}
@@ -113,6 +115,14 @@ func (c *CaseVideoTeams) Configure(config PeerCaseConfig, sendSignal func(signal
 	userAgent := "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
 	if val, ok := config.AdditionalConfig["user_agent"]; ok {
 		userAgent = val
+	}
+
+	var fieldTrials []string
+	for key, val := range config.AdditionalConfig {
+		if strings.HasPrefix(key, "FieldTrial:") {
+			fieldTrialKey := strings.TrimPrefix(key, "FieldTrial:")
+			fieldTrials = append(fieldTrials, fieldTrialKey+"/"+val)
+		}
 	}
 
 	c.statInterval = time.Duration(config.StatInterval)
@@ -175,6 +185,13 @@ func (c *CaseVideoTeams) Configure(config PeerCaseConfig, sendSignal func(signal
 		chromedp.Flag("use-fake-device-for-media-stream", true),
 		chromedp.Flag("use-file-for-fake-video-capture", videoFilePath),
 	)
+
+	if len(fieldTrials) > 0 {
+		fieldTrialString := strings.Join(fieldTrials, "/") + "/"
+		opts = append(opts, chromedp.Flag("force-fieldtrials", fieldTrialString))
+		log.Info().Msgf("Field trials configured using --force-fieldtrials='%v'", fieldTrialString)
+	}
+
 	var contextOptions []chromedp.ContextOption
 
 	if debugBrowserEvents {
@@ -206,9 +223,16 @@ func (c *CaseVideoTeams) Configure(config PeerCaseConfig, sendSignal func(signal
 
 	c.browserContext = browserContext
 	c.browserContextCancel = func() {
+		log.Debug().Msg("Cancelling chromedp context...")
 		browserContextCancel()
+		log.Debug().Msg("Cancelling chromedp parent context...")
 		parentCtxCancel()
-		_ = os.RemoveAll(prefsTempDir)
+		go func() {
+			log.Debug().Msg("Deleting temp pref files...")
+			err := os.RemoveAll(prefsTempDir)
+			log.Debug().Err(err).Msg("Temp prefs removed")
+		}()
+		log.Debug().Msg("Finished browser cleanup.")
 	}
 
 	// Automatically inject RTCPeerConnection proxy constructor on page load
@@ -645,9 +669,31 @@ func (c *CaseVideoTeams) Stop() {
 	c.isStopping = true
 	c.statCollector.StopCollection()
 
-	_ = chromedp.Run(c.browserContext, chromedp.ActionFunc(func(ctx context.Context) error {
-		return browser.Close().Do(ctx)
-	}))
+	wg := sync.WaitGroup{}
+	wg.Add(1)
 
-	c.browserContextCancel()
+	go func() {
+		err := chromedp.Run(c.browserContext, chromedp.Navigate("about:blank"))
+		if err != nil {
+			log.Error().Err(err).Msg("Error navigating to about:blank")
+		}
+
+		c.browserContextCancel()
+		log.Debug().Msg("Cancelled browser context")
+		wg.Done()
+	}()
+
+	select {
+	case <-c.browserContext.Done():
+		break
+	case <-time.After(15 * time.Second):
+		log.Warn().Msg("Timed out waiting for browser context, killing browser process anyway")
+		break
+	}
+
+	err := exec.Command("pkill", "-9", "headless").Run()
+	if err != nil {
+		log.Error().Err(err).Msg("Error killing chromium processes")
+	}
+	log.Debug().Msg("Killed all chromium processes")
 }
